@@ -1,0 +1,27 @@
+name: Render PlantUML Diagrams
+
+on:
+  push:
+    paths:
+      - "UML/**/*.puml"
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Render PlantUML to PNG
+        uses: Timmy/plantuml-action@v1
+        with:
+          args: -tpng UML/*.puml
+
+      - name: Commit rendered images
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add UML/*.png || true
+          git commit -m "Auto-render PlantUML diagrams" || echo "No changes"
+          git push
