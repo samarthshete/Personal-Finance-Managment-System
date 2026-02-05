@@ -1,0 +1,47 @@
+@startuml
+title Activity Diagram - Add Transaction (with Auto-Categorization and Budget Alert)
+
+|User|
+start
+:Select "Add Transaction";
+
+|System|
+:Display transaction form;
+
+|User|
+:Enter transaction details\n(date, amount, description,\nmerchant, account);
+
+|System|
+:Validate input;
+
+if (Valid?) then (yes)
+  :Run categorization rules;
+  if (Rule matched?) then (yes)
+    :Assign category;
+  else (no)
+    :Mark as Uncategorized;
+  endif
+
+  :Persist transaction;
+  :Recalculate budget usage\n(for transaction month);
+
+  if (Budget threshold exceeded?) then (yes)
+    :Publish BudgetThresholdBreached event;
+    :Notify user (in-app alert);
+  else (no)
+    :No alert;
+  endif
+
+  :Show success confirmation;
+
+else (no)
+  :Show validation error;
+  |User|
+  :Correct input;
+  |System|
+  :Validate input;
+  ' loop back by falling through in typical activity flow
+endif
+
+stop
+@enduml
