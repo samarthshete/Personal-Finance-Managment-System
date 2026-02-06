@@ -1,0 +1,20 @@
+@startuml
+title State Diagram - Recurring Transaction Lifecycle
+
+[*] --> Draft
+
+Draft --> Scheduled : saveSchedule()
+Scheduled --> Generated : runScheduler() [dueDateReached]
+
+Generated --> Confirmed : userConfirms()
+Generated --> Skipped : userSkips()
+
+Scheduled --> Cancelled : cancel()
+Generated --> Cancelled : cancel()
+
+Skipped --> Scheduled : nextCycle()
+Confirmed --> Scheduled : nextCycle()
+
+Cancelled --> [*]
+
+@enduml
