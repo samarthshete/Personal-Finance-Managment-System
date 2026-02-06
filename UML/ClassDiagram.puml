@@ -1,0 +1,140 @@
+@startuml
+title Class Diagram - Personal Finance Management System
+skinparam classAttributeIconSize 0
+
+' =========================
+' Domain Layer (Entities / Value Objects)
+' =========================
+class Account {
+  -id: UUID
+  -name: String
+  -currency: String
+  -type: AccountType
+}
+
+class Transaction {
+  -id: UUID
+  -postedOn: Date
+  -description: String
+  -merchant: String
+  -amount: Money
+  -category: Category
+  +isExpense(): boolean
+}
+
+class Budget {
+  -id: UUID
+  -name: String
+  -period: String
+  -limit: Money
+  -thresholdPct: double
+  +isThresholdExceeded(used: Money): boolean
+}
+
+class Category {
+  -name: String
+}
+
+class Money {
+  -amount: double
+  -currency: String
+  +add(m: Money): Money
+  +subtract(m: Money): Money
+}
+
+' =========================
+' Application Layer (Controllers / Services)
+' =========================
+class TransactionController {
+  +addTransaction(data: TransactionDTO): void
+}
+
+class TransactionValidator {
+  +validate(data: TransactionDTO): ValidationResult
+}
+
+class CategorizationService {
+  -strategy: CategorizationStrategy
+  +categorize(tx: Transaction): CategoryDecision
+}
+
+interface CategorizationStrategy {
+  +decide(tx: Transaction): CategoryDecision
+}
+
+class RegexRuleStrategy {
+  -rules: List<Rule>
+  +decide(tx: Transaction): CategoryDecision
+}
+
+class Rule {
+  -pattern: String
+  -priority: int
+  -category: Category
+}
+
+' =========================
+' Budget / Alerts (Observer + Factory)
+' =========================
+class BudgetService {
+  +updateUsage(tx: Transaction): BudgetStatus
+  +checkThreshold(status: BudgetStatus): boolean
+}
+
+' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+' MANDATORY FIX: BudgetStatus was referenced
+' but missing. Added below.
+' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+class BudgetStatus {
+  -usedAmount: Money
+  -limit: Money
+  -percentageUsed: double
+}
+
+interface Alert
+
+class BudgetAlert
+
+class AlertFactory {
+  +createBudgetAlert(status: BudgetStatus): BudgetAlert
+}
+
+class NotificationService {
+  +send(alert: Alert): void
+}
+
+' =========================
+' Infrastructure Layer (Repository Pattern)
+' =========================
+interface TransactionRepository {
+  +save(tx: Transaction): void
+  +findByMonth(year:int, month:int): List<Transaction>
+}
+
+class SQLiteTransactionRepository
+
+SQLiteTransactionRepository ..|> TransactionRepository
+
+' =========================
+' Relationships
+' =========================
+Account "1" -- "0..*" Transaction
+Transaction "0..1" -- "1" Category
+Budget "1" -- "1..*" Category
+
+CategorizationService "1" o-- "1" CategorizationStrategy
+RegexRuleStrategy "1" *-- "0..*" Rule
+
+TransactionController ..> TransactionValidator
+TransactionController ..> CategorizationService
+TransactionController ..> TransactionRepository
+
+BudgetService ..> TransactionRepository
+BudgetService ..> AlertFactory
+BudgetService ..> NotificationService
+
+BudgetAlert ..|> Alert
+AlertFactory ..> BudgetStatus
+BudgetService ..> BudgetStatus
+
+@enduml
