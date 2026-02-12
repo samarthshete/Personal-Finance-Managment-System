@@ -1,0 +1,66 @@
+@startuml UC05_Set_Budget_Thresholds_Robustness
+
+title Robustness Diagram: UC05 - Set Budget Thresholds
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actor
+actor "User" as user
+
+' Boundary Objects (UI/Interface)
+boundary "Budget\nSettings Screen" as budgetScreen
+boundary "Category\nSelector" as categorySelector
+boundary "Amount\nInput Form" as amountForm
+boundary "Period\nSelector" as periodSelector
+boundary "Alert Threshold\nConfiguration" as alertConfig
+boundary "Confirmation\nMessage" as confirmationMsg
+
+' Control Objects (Business Logic)
+control "Budget\nController" as budgetController
+control "Validation\nHandler" as validationHandler
+control "Alert\nConfiguration\nManager" as alertConfigManager
+
+' Entity Objects (Data)
+entity "Budget" as budgetEntity
+entity "Category" as categoryEntity
+entity "User" as userEntity
+
+' Connections: Actor <-> Boundary
+user --> budgetScreen : accesses budget settings
+user --> categorySelector : selects category
+user --> amountForm : enters budget amount
+user --> periodSelector : selects period (weekly/monthly/yearly)
+user --> alertConfig : sets alert thresholds (80%, 90%)
+budgetScreen --> user : displays current budgets
+confirmationMsg --> user : shows save confirmation
+
+' Connections: Boundary <-> Control
+budgetScreen --> budgetController : load budgets
+categorySelector --> budgetController : category selected
+amountForm --> validationHandler : validate amount
+periodSelector --> budgetController : period selected
+alertConfig --> alertConfigManager : configure alerts
+validationHandler --> budgetController : validated data
+budgetController --> confirmationMsg : budget saved
+
+' Connections: Control <-> Control
+budgetController --> alertConfigManager : setup alert triggers
+alertConfigManager --> budgetController : alerts configured
+
+' Connections: Control <-> Entity
+budgetController --> budgetEntity : create/update budget
+budgetController --> categoryEntity : get category info
+budgetController --> userEntity : associate with user
+alertConfigManager --> budgetEntity : set threshold values
+
+note bottom
+    **Robustness Analysis:**
+    - User sets budget amount, category, and period
+    - Validation Handler ensures valid input
+    - Alert Configuration Manager sets up threshold triggers
+    - Budget entity stores limit and alert thresholds
+    - Includes UC06 (Receive Budget Alerts) setup
+end note
+
+@enduml

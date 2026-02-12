@@ -1,0 +1,133 @@
+@startuml use_case_diagram
+
+title Intelligent Personal Finance Management System - Use Case Diagram
+
+left to right direction
+skinparam packageStyle rectangle
+
+'==============================================================================
+' ACTORS
+'==============================================================================
+' Primary Actor (left side)
+actor "User" as User
+
+' Secondary Actors - External Systems (right side)
+actor "External\nBanking System" as BankingSystem
+actor "Notification\nService" as NotificationService
+
+'==============================================================================
+' SYSTEM BOUNDARY (SCOPE) - 7 USE CASES
+'==============================================================================
+rectangle "Intelligent Personal Finance Management System" {
+    
+    usecase "Authenticate User" as UC01
+    usecase "Manage Accounts" as UC02
+    usecase "Import Transactions" as UC03
+    usecase "Categorize Expenses" as UC04
+    usecase "Set Budget Thresholds" as UC05
+    usecase "Receive Budget Alerts" as UC06
+    usecase "View Analytics Dashboard" as UC07
+}
+
+'==============================================================================
+' PRIMARY ACTOR ASSOCIATIONS (User)
+'==============================================================================
+User --> UC01
+User --> UC02
+User --> UC03
+User --> UC04
+User --> UC05
+User --> UC07
+
+'==============================================================================
+' SECONDARY ACTOR ASSOCIATIONS (External Systems)
+'==============================================================================
+BankingSystem --> UC03
+NotificationService --> UC06
+
+'==============================================================================
+' <<include>> RELATIONSHIPS
+'==============================================================================
+UC02 ..> UC01 : <<include>>
+UC03 ..> UC04 : <<include>>
+UC05 ..> UC06 : <<include>>
+
+'==============================================================================
+' ACTOR NOTES (1 paragraph each)
+'==============================================================================
+note left of User
+    **Primary Actor:** The User is the primary actor 
+    who interacts with the system to manage personal 
+    finances, set budgets, view analytics, and receive 
+    notifications when budget thresholds are exceeded.
+end note
+
+note right of BankingSystem
+    **Secondary Actor (External System):** The External 
+    Banking System provides transaction data to the 
+    application during import. It represents the outside 
+    banking platform that the system communicates with 
+    to retrieve financial records securely.
+end note
+
+note right of NotificationService
+    **Secondary Actor (External System):** The Notification 
+    Service delivers alert messages to users when budget 
+    conditions are triggered. It represents external 
+    messaging capabilities such as email, SMS, or push 
+    notification services.
+end note
+
+'==============================================================================
+' USE CASE NOTES (1 paragraph each)
+'==============================================================================
+note top of UC01
+    **Authenticate User:** Verifies user identity through 
+    secure login credentials. This reusable use case 
+    establishes a valid session and is included by 
+    other use cases requiring identity verification.
+end note
+
+note top of UC02
+    **Manage Accounts:** Allows the user to add, edit, 
+    and remove financial accounts in the system. This 
+    use case includes authentication to ensure only 
+    authorized users can access account information.
+end note
+
+note top of UC03
+    **Import Transactions:** Enables the user to bring 
+    transaction records from the External Banking System. 
+    Once imported, transactions are automatically sent 
+    for categorization to organize spending data.
+end note
+
+note bottom of UC04
+    **Categorize Expenses:** Assigns transactions into 
+    spending categories using rules, AI classification, 
+    or manual input. Proper categorization supports 
+    budgeting, alerts, and dashboard analytics.
+end note
+
+note bottom of UC05
+    **Set Budget Thresholds:** Allows users to define 
+    spending limits for categories or overall budgets. 
+    These thresholds determine when the system triggers 
+    alert notifications to warn users.
+end note
+
+note bottom of UC06
+    **Receive Budget Alerts:** Triggered when spending 
+    crosses user-defined thresholds. The system generates 
+    alerts delivered via the Notification Service to 
+    inform users of budget status in real-time.
+end note
+
+note bottom of UC07
+    **View Analytics Dashboard:** Displays visual charts, 
+    spending breakdowns, and trends based on categorized 
+    transactions. Users can analyze financial habits and 
+    make informed financial decisions.
+end note
+
+@enduml

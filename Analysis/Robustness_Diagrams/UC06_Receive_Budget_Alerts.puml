@@ -1,0 +1,69 @@
+@startuml UC06_Receive_Budget_Alerts_Robustness
+
+title Robustness Diagram: UC06 - Receive Budget Alerts
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actors
+actor "User" as user
+actor "Notification\nService" as notificationService
+
+' Boundary Objects (UI/Interface)
+boundary "Alert\nNotification\nPanel" as alertPanel
+boundary "Alert\nDetails Screen" as alertDetailsScreen
+boundary "Email/Push\nInterface" as notificationInterface
+boundary "Dashboard\nAlert Badge" as alertBadge
+
+' Control Objects (Business Logic)
+control "Budget\nMonitor" as budgetMonitor
+control "Alert\nController" as alertController
+control "Alert\nFactory" as alertFactory
+control "Notification\nDispatcher" as notificationDispatcher
+
+' Entity Objects (Data)
+entity "Budget" as budgetEntity
+entity "Budget Alert" as alertEntity
+entity "Transaction" as transactionEntity
+entity "User\nPreferences" as userPrefsEntity
+
+' Connections: Actor <-> Boundary
+alertPanel --> user : displays alert notification
+alertDetailsScreen --> user : shows alert details
+alertBadge --> user : indicates unread alerts
+user --> alertPanel : views alerts
+user --> alertDetailsScreen : clicks alert for details
+
+' Connections: Secondary Actor <-> Boundary
+notificationInterface --> notificationService : send notification request
+notificationService --> notificationInterface : delivery confirmation
+
+' Connections: Boundary <-> Control
+alertController --> alertPanel : display new alert
+alertController --> alertBadge : update badge count
+alertController --> alertDetailsScreen : provide alert info
+notificationDispatcher --> notificationInterface : send external notification
+
+' Connections: Control <-> Control
+budgetMonitor --> alertFactory : threshold exceeded
+alertFactory --> alertController : create alert
+alertController --> notificationDispatcher : dispatch notification
+
+' Connections: Control <-> Entity
+budgetMonitor --> budgetEntity : check thresholds
+budgetMonitor --> transactionEntity : calculate spending
+alertFactory --> alertEntity : create alert record
+alertController --> alertEntity : save/retrieve alerts
+notificationDispatcher --> userPrefsEntity : get notification preferences
+
+note bottom
+    **Robustness Analysis (Observer + Factory Pattern):**
+    - Budget Monitor observes transactions (Observer Pattern)
+    - When threshold exceeded (80%, 90%, 100%):
+      - Alert Factory creates appropriate alert (Factory Pattern)
+      - Alert Controller manages display and persistence
+      - Notification Dispatcher sends via Notification Service
+    - User sees alerts in panel and receives email/push
+end note
+
+@enduml

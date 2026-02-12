@@ -1,0 +1,69 @@
+@startuml UC03_Import_Transactions_Robustness
+
+title Robustness Diagram: UC03 - Import Transactions
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actors
+actor "User" as user
+actor "External\nBanking System" as bankingSystem
+
+' Boundary Objects (UI/Interface)
+boundary "Import\nScreen" as importScreen
+boundary "Account\nSelector" as accountSelector
+boundary "File Upload\nDialog" as fileUpload
+boundary "Import Progress\nIndicator" as progressIndicator
+boundary "Bank API\nInterface" as bankAPIInterface
+boundary "Import Result\nScreen" as resultScreen
+
+' Control Objects (Business Logic)
+control "Import\nController" as importController
+control "Transaction\nParser" as transactionParser
+control "Duplicate\nDetector" as duplicateDetector
+control "Categorization\nTrigger" as categorizationTrigger
+
+' Entity Objects (Data)
+entity "Transaction" as transactionEntity
+entity "Account" as accountEntity
+
+' Connections: Actor <-> Boundary
+user --> importScreen : initiates import
+user --> accountSelector : selects account
+user --> fileUpload : uploads CSV file
+importScreen --> user : shows import options
+progressIndicator --> user : displays progress
+resultScreen --> user : shows import summary
+
+' Connections: Secondary Actor <-> Boundary
+bankAPIInterface --> bankingSystem : requests transactions
+bankingSystem --> bankAPIInterface : returns transaction data
+
+' Connections: Boundary <-> Control
+importScreen --> importController : start import
+accountSelector --> importController : selected account
+fileUpload --> transactionParser : file data
+bankAPIInterface --> transactionParser : bank data
+importController --> progressIndicator : update progress
+importController --> resultScreen : import complete
+
+' Connections: Control <-> Control
+transactionParser --> duplicateDetector : parsed transactions
+duplicateDetector --> importController : unique transactions
+importController --> categorizationTrigger : trigger categorization
+
+' Connections: Control <-> Entity
+importController --> accountEntity : get account info
+importController --> transactionEntity : save transactions
+duplicateDetector --> transactionEntity : check existing
+
+note bottom
+    **Robustness Analysis:**
+    - User selects import method (Bank sync or CSV upload)
+    - External Banking System provides transaction data via API
+    - Transaction Parser normalizes data from different sources
+    - Duplicate Detector prevents duplicate entries
+    - Triggers UC04 (Categorize Expenses) after import
+end note
+
+@enduml

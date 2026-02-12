@@ -1,0 +1,70 @@
+@startuml UC07_View_Analytics_Dashboard_Robustness
+
+title Robustness Diagram: UC07 - View Analytics Dashboard
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actor
+actor "User" as user
+
+' Boundary Objects (UI/Interface)
+boundary "Dashboard\nScreen" as dashboardScreen
+boundary "Spending\nCharts" as spendingCharts
+boundary "Category\nBreakdown\nPanel" as categoryPanel
+boundary "Date Range\nFilter" as dateFilter
+boundary "Budget\nProgress\nIndicators" as budgetProgress
+boundary "Trend\nVisualization" as trendViz
+
+' Control Objects (Business Logic)
+control "Analytics\nController" as analyticsController
+control "Data\nAggregator" as dataAggregator
+control "Chart\nGenerator" as chartGenerator
+control "Trend\nAnalyzer" as trendAnalyzer
+
+' Entity Objects (Data)
+entity "Transaction" as transactionEntity
+entity "Category" as categoryEntity
+entity "Budget" as budgetEntity
+entity "Account" as accountEntity
+
+' Connections: Actor <-> Boundary
+user --> dashboardScreen : opens dashboard
+user --> dateFilter : selects date range
+dashboardScreen --> user : displays overview
+spendingCharts --> user : shows spending graphs
+categoryPanel --> user : shows category breakdown
+budgetProgress --> user : shows budget status
+trendViz --> user : shows spending trends
+
+' Connections: Boundary <-> Control
+dashboardScreen --> analyticsController : load dashboard data
+dateFilter --> analyticsController : filter by date range
+analyticsController --> spendingCharts : chart data
+analyticsController --> categoryPanel : category data
+analyticsController --> budgetProgress : budget vs actual
+analyticsController --> trendViz : trend data
+
+' Connections: Control <-> Control
+analyticsController --> dataAggregator : request aggregations
+dataAggregator --> chartGenerator : aggregated data
+dataAggregator --> trendAnalyzer : calculate trends
+chartGenerator --> analyticsController : formatted charts
+trendAnalyzer --> analyticsController : trend insights
+
+' Connections: Control <-> Entity
+dataAggregator --> transactionEntity : fetch transactions
+dataAggregator --> categoryEntity : group by category
+dataAggregator --> budgetEntity : compare with budgets
+dataAggregator --> accountEntity : filter by account
+
+note bottom
+    **Robustness Analysis:**
+    - User views dashboard with spending analytics
+    - Data Aggregator collects data from multiple entities
+    - Chart Generator creates visual representations
+    - Trend Analyzer identifies spending patterns
+    - Can be extended by UC08 (Export Reports)
+end note
+
+@enduml

@@ -1,0 +1,50 @@
+@startuml UC01_Authenticate_User_Robustness
+
+title Robustness Diagram: UC01 - Authenticate User
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actor
+actor "User" as user
+
+' Boundary Objects (UI/Interface)
+boundary "Login Screen" as loginScreen
+boundary "Dashboard Screen" as dashboardScreen
+boundary "Error Message\nDisplay" as errorDisplay
+
+' Control Objects (Business Logic)
+control "Authentication\nController" as authController
+control "Session\nManager" as sessionManager
+
+' Entity Objects (Data)
+entity "User\nAccount" as userEntity
+entity "Session" as sessionEntity
+
+' Connections: Actor <-> Boundary
+user --> loginScreen : enters credentials
+loginScreen --> user : displays login form
+dashboardScreen --> user : redirects on success
+errorDisplay --> user : shows error message
+
+' Connections: Boundary <-> Control
+loginScreen --> authController : submit credentials
+authController --> dashboardScreen : authentication success
+authController --> errorDisplay : authentication failed
+
+' Connections: Control <-> Control
+authController --> sessionManager : create session
+
+' Connections: Control <-> Entity
+authController --> userEntity : validate credentials
+sessionManager --> sessionEntity : store session data
+
+note bottom
+    **Robustness Analysis:**
+    - User enters email/password on Login Screen
+    - Authentication Controller validates against User Account entity
+    - On success: Session Manager creates Session, redirects to Dashboard
+    - On failure: Error Message displayed to User
+end note
+
+@enduml

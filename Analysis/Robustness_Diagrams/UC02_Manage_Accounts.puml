@@ -1,0 +1,58 @@
+@startuml UC02_Manage_Accounts_Robustness
+
+title Robustness Diagram: UC02 - Manage Accounts
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actor
+actor "User" as user
+
+' Boundary Objects (UI/Interface)
+boundary "Account List\nScreen" as accountListScreen
+boundary "Add Account\nForm" as addAccountForm
+boundary "Edit Account\nForm" as editAccountForm
+boundary "Confirmation\nDialog" as confirmDialog
+boundary "Success/Error\nMessage" as messageDisplay
+
+' Control Objects (Business Logic)
+control "Account\nController" as accountController
+control "Validation\nHandler" as validationHandler
+
+' Entity Objects (Data)
+entity "Account" as accountEntity
+entity "User" as userEntity
+
+' Connections: Actor <-> Boundary
+user --> accountListScreen : views accounts
+user --> addAccountForm : adds new account
+user --> editAccountForm : edits account
+user --> confirmDialog : confirms delete
+accountListScreen --> user : displays account list
+messageDisplay --> user : shows result
+
+' Connections: Boundary <-> Control
+accountListScreen --> accountController : request accounts
+addAccountForm --> validationHandler : submit new account
+editAccountForm --> validationHandler : submit changes
+confirmDialog --> accountController : confirm deletion
+accountController --> messageDisplay : operation result
+accountController --> accountListScreen : refresh list
+
+' Connections: Control <-> Control
+validationHandler --> accountController : validated data
+
+' Connections: Control <-> Entity
+accountController --> accountEntity : CRUD operations
+accountController --> userEntity : verify ownership
+
+note bottom
+    **Robustness Analysis:**
+    - User views/adds/edits/deletes accounts via respective screens
+    - Validation Handler ensures data integrity
+    - Account Controller performs CRUD on Account entity
+    - User ownership verified before operations
+    - Includes UC01 (Authenticate User) before access
+end note
+
+@enduml

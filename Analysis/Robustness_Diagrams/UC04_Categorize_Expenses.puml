@@ -1,0 +1,67 @@
+@startuml UC04_Categorize_Expenses_Robustness
+
+title Robustness Diagram: UC04 - Categorize Expenses
+
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+
+' Actor
+actor "User" as user
+
+' Boundary Objects (UI/Interface)
+boundary "Transaction\nList Screen" as transactionListScreen
+boundary "Category\nSelector" as categorySelector
+boundary "Manual\nCategorization\nPrompt" as manualPrompt
+boundary "Categorization\nResult Display" as resultDisplay
+
+' Control Objects (Business Logic)
+control "Categorization\nController" as categController
+control "Rule-Based\nHandler" as ruleHandler
+control "AI Classification\nHandler" as aiHandler
+control "Manual\nHandler" as manualHandler
+control "Confidence\nEvaluator" as confidenceEvaluator
+
+' Entity Objects (Data)
+entity "Transaction" as transactionEntity
+entity "Category" as categoryEntity
+entity "Categorization\nRule" as ruleEntity
+
+' Connections: Actor <-> Boundary
+user --> transactionListScreen : views transactions
+user --> categorySelector : selects category manually
+user --> manualPrompt : responds to prompt
+transactionListScreen --> user : displays transactions
+manualPrompt --> user : asks for category
+resultDisplay --> user : shows categorization result
+
+' Connections: Boundary <-> Control
+transactionListScreen --> categController : request categorization
+categorySelector --> manualHandler : user selected category
+manualPrompt --> manualHandler : awaits user input
+categController --> resultDisplay : categorization complete
+
+' Connections: Control <-> Control (Chain of Responsibility)
+categController --> ruleHandler : try rule-based first
+ruleHandler --> aiHandler : no rule match, try AI
+aiHandler --> confidenceEvaluator : evaluate confidence
+confidenceEvaluator --> manualHandler : low confidence
+manualHandler --> categController : final category
+
+' Connections: Control <-> Entity
+ruleHandler --> ruleEntity : lookup rules
+ruleHandler --> transactionEntity : match transaction
+aiHandler --> transactionEntity : analyze description
+aiHandler --> categoryEntity : predict category
+categController --> transactionEntity : update category
+categController --> categoryEntity : get categories
+
+note bottom
+    **Robustness Analysis (Chain of Responsibility):**
+    1. Rule-Based Handler: Tries keyword/merchant/amount rules
+    2. AI Handler: Uses LLM if no rule match (via Adapter)
+    3. Confidence Evaluator: Checks AI confidence level
+    4. Manual Handler: Prompts user if confidence < 70%
+    - Updates Transaction entity with assigned Category
+end note
+
+@enduml
