@@ -1,147 +1,81 @@
 @startuml
-
 title Intelligent Personal Finance Management System - Use Case Diagram
 
+' --- Landscape layout ---
 left to right direction
 skinparam packageStyle rectangle
-skinparam noteBorderColor #999999
-skinparam noteBackgroundColor #FFFFCC
-
-' ============================================================
-' ACTORS
-' ============================================================
-
-actor "User" as User
-
-actor "External Banking\nSystem" as BankingSystem
-
-actor "Notification\nService" as NotificationService
-
-' ============================================================
-' SYSTEM BOUNDARY
-' ============================================================
-
-rectangle "Intelligent Personal Finance Management System" {
-    
-    usecase "View Analytics Dashboard" as UC_Dashboard
-    
-    usecase "Categorize Expenses" as UC_Categorize
-    
-    usecase "Import Transactions" as UC_Import
-    
-    usecase "Authenticate User" as UC_Auth
-    
-    usecase "Manage Accounts" as UC_Accounts
-    
-    usecase "Receive Budget Alerts" as UC_Alerts
-    
-    usecase "Set Budget Thresholds" as UC_Budget
+skinparam actorStyle awesome
+skinparam shadowing false
+skinparam usecase {
+  BackgroundColor #F8F8F8
+  BorderColor #444444
+}
+skinparam rectangle {
+  BorderColor #222222
 }
 
-' ============================================================
+' =========================
+' ACTORS
+' =========================
+actor "User" as User
+
+actor "External Banking System" as BankingSystem <<external system>>
+actor "Notification Service" as NotificationService <<external system>>
+
+' =========================
+' SYSTEM BOUNDARY
+' =========================
+rectangle "Intelligent Personal Finance Management System" {
+
+    ' Left column (User Goals)
+    usecase "Manage Accounts" as UC_Accounts
+    usecase "Import Transactions" as UC_Import
+    usecase "Set Budget Thresholds" as UC_Budget
+    usecase "View Analytics Dashboard" as UC_Dashboard
+
+    ' Right column (Supporting / System Behavior)
+    usecase "Authenticate User" as UC_Auth
+    usecase "Categorize Expenses" as UC_Categorize
+    usecase "Receive Budget Alerts" as UC_Alerts
+}
+
+' =========================
 ' ACTOR ASSOCIATIONS
-' ============================================================
-
-' Primary Actor - User
-User --> UC_Dashboard
-User --> UC_Categorize
-User --> UC_Import
+' =========================
 User --> UC_Accounts
+User --> UC_Import
 User --> UC_Budget
+User --> UC_Dashboard
 
-' Secondary Actor - External Banking System
 BankingSystem --> UC_Import
-
-' Secondary Actor - Notification Service
 NotificationService --> UC_Alerts
 
-' ============================================================
-' USE CASE RELATIONSHIPS
-' ============================================================
-
-' <<include>> relationships
-UC_Import ..> UC_Categorize : <<include>>
+' =========================
+' <<include>> RELATIONSHIPS
+' BASE --> INCLUDED (Correct Direction)
+' =========================
 UC_Accounts ..> UC_Auth : <<include>>
-UC_Budget ..> UC_Alerts : <<include>>
+UC_Import ..> UC_Auth : <<include>>
+UC_Budget ..> UC_Auth : <<include>>
+UC_Dashboard ..> UC_Auth : <<include>>
 
-' ============================================================
-' ACTOR NOTES
-' ============================================================
+' Import always triggers categorization
+UC_Import ..> UC_Categorize : <<include>>
 
+' =========================
+' NOTES (optional but clean)
+' =========================
 note left of User
-    **Primary Actor:** The User is the primary actor
-    who interacts with the system to manage personal
-    finances, set budgets, view analytics, and receive
-    notifications when budget thresholds are exceeded.
+Primary actor who manages finances,
+budgets, and analytics.
 end note
 
-note bottom of BankingSystem
-    **Secondary Actor (External System):** The External
-    Banking System provides transaction data to the
-    application during import. It represents the outside
-    banking platform that the system communicates with
-    to retrieve financial records securely.
+note right of BankingSystem
+Provides transaction data during import.
 end note
 
-note bottom of NotificationService
-    **Secondary Actor (External System):** The Notification
-    Service delivers alert messages to users when budget
-    conditions are triggered. It represents external
-    messaging capabilities such as email, SMS, or push
-    notification services.
+note right of NotificationService
+Delivers alerts when budget thresholds
+are exceeded.
 end note
-
-' ============================================================
-' USE CASE NOTES
-' ============================================================
-
-note top of UC_Dashboard
-    **View Analytics Dashboard:** Displays visual charts,
-    spending breakdowns, and trends based on categorized
-    transactions. Users can analyze financial habits and
-    make informed decisions from this view.
-end note
-
-note top of UC_Categorize
-    **Categorize Expenses:** Assigns transactions into
-    spending categories using rules, AI classification,
-    or manual input. Proper categorization supports
-    budgeting, alerts, and dashboard analytics.
-end note
-
-note left of UC_Import
-    **Import Transactions:** Enables the user to bring
-    transaction records from the External Banking System.
-    Once imported, transactions are automatically sent
-    for categorization to organize spending data.
-end note
-
-note right of UC_Auth
-    **Authenticate User:** Verifies user identity through
-    secure login credentials. This reusable use case
-    establishes a valid session and is included by
-    other use cases requiring identity verification.
-end note
-
-note left of UC_Accounts
-    **Manage Accounts:** Allows the user to add, edit,
-    and remove financial accounts in the system. This
-    use case includes authentication to ensure only
-    authorized users can access account information.
-end note
-
-note right of UC_Alerts
-    **Receive Budget Alerts:** Triggered when spending
-    crosses user-defined thresholds. The system generates
-    alerts delivered via the Notification Service to
-    inform users of budget status in real-time.
-end note
-
-note left of UC_Budget
-    **Set Budget Thresholds:** Allows users to define
-    spending limits for categories or overall budgets.
-    These thresholds determine when the system triggers
-    alert notifications to warn users.
-end note
-
 @enduml
