@@ -1,0 +1,87 @@
+@startuml
+skinparam classAttributeIconSize 0
+title Domain Model - Intelligent Personal Finance Management System
+
+class User {
+  +userId: UUID
+  +name: String
+  +email: String
+}
+
+abstract class FinancialAccount {
+  +accountId: UUID
+  +nickname: String
+  +currency: String
+}
+
+class BankAccount {
+  +routingNumberLast4: String
+}
+
+class CreditCardAccount {
+  +cardLast4: String
+  +creditLimit: Decimal
+}
+
+class InvestmentAccount {
+  +brokerName: String
+}
+
+class Institution {
+  +institutionId: UUID
+  +name: String
+}
+
+class Transaction {
+  +transactionId: UUID
+  +postedDate: Date
+  +amount: Decimal
+  +description: String
+}
+
+class Merchant {
+  +merchantId: UUID
+  +name: String
+}
+
+class Category {
+  +categoryId: UUID
+  +name: String
+  +type: String
+}
+
+class Budget {
+  +budgetId: UUID
+  +periodStart: Date
+  +periodEnd: Date
+}
+
+class BudgetItem {
+  +budgetItemId: UUID
+  +limitAmount: Decimal
+}
+
+class BudgetAlert {
+  +alertId: UUID
+  +thresholdPercent: Int
+  +createdAt: DateTime
+}
+
+FinancialAccount <|-- BankAccount
+FinancialAccount <|-- CreditCardAccount
+FinancialAccount <|-- InvestmentAccount
+
+User "1" -- "0..*" FinancialAccount
+Institution "1" -- "0..*" FinancialAccount
+FinancialAccount "1" -- "0..*" Transaction
+
+Transaction "*" -- "1" Category
+Transaction "*" -- "0..1" Merchant
+
+User "1" -- "0..*" Budget
+Budget "1" -- "1..*" BudgetItem
+BudgetItem "1" -- "1" Category
+
+User "1" -- "0..*" BudgetAlert
+BudgetAlert "0..*" -- "0..1" Budget
+@enduml
