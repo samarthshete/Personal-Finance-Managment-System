@@ -1,74 +1,13 @@
 @startuml
-title Class Diagram - Complete (Optimized & Consistent)
+title Class Diagram - Complete (Ultra-Compact for Hand Drawing)
+footer Group 28 | Karan Patel, Samarth Shete | CSCI 6234
 skinparam classAttributeIconSize 0
+skinparam backgroundColor white
 
-' ===== Boundaries =====
-class "Authenticate UI" as AuthUI <<boundary>> {
-  +enterCredentials(email: String, password: String): void
-  +showLoginResult(isValid: Boolean): void
-}
-class "Accounts UI" as AccountUI <<boundary>> {
-  +submitAccountChanges(accountId: UUID, nickname: String, isActive: Boolean): void
-  +showAccount(accountId: UUID): void
-}
-class "Import UI" as ImportUI <<boundary>> {
-  +uploadFile(accountId: UUID, file: Bytes): void
-  +showImportSummary(importedCount: int): void
-}
-class "Category UI" as CategoryUI <<boundary>> {
-  +chooseAutoCategorize(accountId: UUID): void
-  +showCategorizationResult(updatedCount: int): void
-}
-class "Budget UI" as BudgetUI <<boundary>> {
-  +submitBudget(periodStart: Date, periodEnd: Date, items: String): void
-  +showBudgetSaved(budgetId: UUID): void
-}
-class "Alerts UI" as AlertUI <<boundary>> {
-  +showAlerts(alerts: List<BudgetAlert>): void
-}
-class "Analytics UI" as AnalyticsUI <<boundary>> {
-  +openDashboard(period: String): void
-  +renderDashboard(spendingSummary: Map<String, Decimal>, budgetStatus: String): void
-}
-
-' ===== Controls =====
-class AuthService <<control>> {
-  +normalizeEmail(email: String): String
-  +login(email: String, password: String): Boolean
-}
-class AccountService <<control>> {
-  +manageAccount(userId: UUID, accountId: UUID, nickname: String, isActive: Boolean): void
-  +validateOwnership(userId: UUID, account: FinancialAccount): void
-}
-class TransactionImportService <<control>> {
-  +importTransactions(userId: UUID, accountId: UUID, file: Bytes): int
-  +validateOwnership(userId: UUID, account: FinancialAccount): void
-  +parseCsv(file: Bytes): List<Object>
-}
-class CategorizationService <<control>> {
-  +categorizeExpenses(userId: UUID, accountId: UUID): int
-  +getUncategorizedTransactions(accountId: UUID): List<Transaction>
-  +summarizeByCategory(txns: List<Transaction>): Map<String, Decimal>
-}
-class BudgetService <<control>> {
-  +setBudgetThresholds(userId: UUID, periodStart: Date, periodEnd: Date, items: String): UUID
-}
-class AlertService <<control>> {
-  +evaluateBudgets(today: Date): void
-  +notifyUser(alert: BudgetAlert): void
-}
-class AnalyticsService <<control>> {
-  +loadDashboard(userId: UUID, period: String): String
-  +summarizeByCategory(txns: List<Transaction>): Map<String, Decimal>
-}
-
-' ===== Entities (Domain) =====
 class User <<entity>> {
   +userId: UUID
   +name: String
   +email: String
-  +findByEmail(email: String): User
-  +verifyPassword(password: String): Boolean
 }
 
 abstract class FinancialAccount <<entity>> {
@@ -76,18 +15,17 @@ abstract class FinancialAccount <<entity>> {
   +nickname: String
   +currency: String
   +isActive: Boolean
-  +getById(accountId: UUID): FinancialAccount
-  +updateDetails(nickname: String, isActive: Boolean): void
-  +addTransaction(txn: Transaction): void
 }
 
 class BankAccount <<entity>> {
   +routingNumberLast4: String
 }
+
 class CreditCardAccount <<entity>> {
   +cardLast4: String
   +creditLimit: Decimal
 }
+
 class InvestmentAccount <<entity>> {
   +brokerName: String
 }
@@ -102,9 +40,6 @@ class Transaction <<entity>> {
   +postedDate: Date
   +amount: Decimal
   +description: String
-  +create(postedDate: Date, amount: Decimal, description: String): Transaction
-  +listByUser(userId: UUID, period: String): List<Transaction>
-  +assignCategory(category: Category): void
 }
 
 class Merchant <<entity>> {
@@ -116,74 +51,56 @@ class Category <<entity>> {
   +categoryId: UUID
   +name: String
   +type: String
-  +suggestCategory(txn: Transaction): Category
 }
 
 class Budget <<entity>> {
   +budgetId: UUID
   +periodStart: Date
   +periodEnd: Date
-  +findOrCreate(userId: UUID, start: Date, end: Date): Budget
-  +getActiveBudgets(today: Date): List<Budget>
-  +listItems(): List<BudgetItem>
-  +addOrUpdateItem(item: BudgetItem): void
-  +getBudgetStatus(userId: UUID, period: String): String
 }
 
 class BudgetItem <<entity>> {
   +budgetItemId: UUID
-  +categoryId: UUID
   +limitAmount: Decimal
-  +findOrCreate(budget: Budget, categoryId: UUID): BudgetItem
-  +setLimit(limit: Decimal): void
-  +calculateSpent(today: Date): Decimal
-  +isThresholdBreached(spentAmount: Decimal): Boolean
 }
 
 class BudgetAlert <<entity>> {
   +alertId: UUID
+  +thresholdPercent: Int
+  +isRead: Boolean
   +createdAt: DateTime
-  +create(budgetId: UUID, itemId: UUID, spentAmount: Decimal): BudgetAlert
 }
 
-' ===== Inheritance =====
+' Inheritance
 FinancialAccount <|-- BankAccount
 FinancialAccount <|-- CreditCardAccount
 FinancialAccount <|-- InvestmentAccount
 
-' ===== Associations =====
-User "1" -- "0..*" FinancialAccount : owns
-Institution "1" -- "0..*" FinancialAccount : provides
-FinancialAccount "1" -- "0..*" Transaction : contains
-Transaction "*" -- "0..1" Merchant : paidTo
-Transaction "*" -- "0..1" Category : belongsTo
-User "1" -- "0..*" Budget : creates
-Budget "1" -- "1..*" BudgetItem : contains
-BudgetItem "*" -- "1" Category : tracks
-User "1" -- "0..*" BudgetAlert : receives
-BudgetAlert "*" -- "0..1" Budget : monitors
+' Associations (keep ALL)
+User "1" -- "0..*" FinancialAccount : owns >
+Institution "1" -- "0..*" FinancialAccount : provides >
+FinancialAccount "1" -- "0..*" Transaction : contains >
 
-' ===== Dependencies =====
-AuthUI ..> AuthService
-AccountUI ..> AccountService
-ImportUI ..> TransactionImportService
-CategoryUI ..> CategorizationService
-BudgetUI ..> BudgetService
-AlertUI ..> AlertService
-AnalyticsUI ..> AnalyticsService
+Transaction "*" -- "0..1" Category : belongsTo >
+Transaction "*" -- "0..1" Merchant : paidTo >
 
-AuthService ..> User
-AccountService ..> FinancialAccount
-TransactionImportService ..> FinancialAccount
-TransactionImportService ..> Transaction
-CategorizationService ..> Transaction
-CategorizationService ..> Category
-BudgetService ..> Budget
-BudgetService ..> BudgetItem
-AlertService ..> Budget
-AlertService ..> BudgetItem
-AlertService ..> BudgetAlert
-AnalyticsService ..> Transaction
-AnalyticsService ..> Budget
+User "1" -- "0..*" Budget : creates >
+Budget "1" -- "1..*" BudgetItem : contains >
+BudgetItem "*" -- "1" Category : tracksSpendingIn >
 
+User "1" -- "0..*" BudgetAlert : receives >
+BudgetAlert "*" -- "0..1" Budget : monitors >
+BudgetAlert "*" -- "0..1" BudgetItem : about >
+
+note bottom
+Methods Legend (kept to satisfy "class methods"):
+User: findByEmail(), verifyPassword(), addAccount()
+FinancialAccount: getById(), updateDetails(), addTransaction()
+Institution: findOrCreate(), linkAccount()
+Transaction: create(), listByUser(), assignCategory()
+Category: suggestCategory()
+Budget: findOrCreate(), getActiveBudgets(), listItems(), addOrUpdateItem(), getBudgetStatus()
+BudgetItem: findOrCreate(), setLimit(), calculateSpent(), isThresholdBreached()
+BudgetAlert: create()
+end note
 @enduml
