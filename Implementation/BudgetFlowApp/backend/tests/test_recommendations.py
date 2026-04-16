@@ -18,8 +18,10 @@ from app.models.transaction import Transaction
 from app.services.recommendation_service import (
     compute_risk_score,
     risk_bucket_for_score,
+    apply_goal_mode,
     compute_emergency_fund_months,
     compute_investable_amount,
+    compute_contribution_tiers,
     rules_gates,
     rules_gates_structured,
     run_projection,
@@ -156,6 +158,12 @@ class TestRiskScoring:
         buckets_order = ["conservative", "moderate_conservative", "balanced", "moderate_growth", "growth"]
         assert buckets_order.index(bucket_short) <= buckets_order.index(bucket_long)
 
+    def test_goal_mode_adjusts_bucket(self):
+        adjusted, _ = apply_goal_mode("balanced", "emergency", 12)
+        assert adjusted in {"conservative", "moderate_conservative"}
+        adjusted_ret, _ = apply_goal_mode("balanced", "retirement", 240)
+        assert adjusted_ret in {"balanced", "moderate_growth", "growth"}
+
 
 class TestComputations:
     def test_emergency_months_zero_spending(self):
@@ -171,6 +179,11 @@ class TestComputations:
     def test_investable_positive(self):
         result = compute_investable_amount(Decimal("5000"), Decimal("3000"))
         assert result == 1600.0  # (5000-3000) * 0.80
+
+    def test_contribution_tiers_ordering(self):
+        tiers = compute_contribution_tiers(Decimal("8000"), Decimal("3000"), 4000.0)
+        assert tiers is not None
+        assert tiers["safe_contribution_monthly"] <= tiers["recommended_contribution_monthly"] <= tiers["stretch_contribution_monthly"]
 
     def test_rules_gates_low_emergency(self):
         warnings = rules_gates(0.5, True, 0)
@@ -438,3 +451,76 @@ async def test_blocked_run_gates_show_failures(client: AsyncClient, db: AsyncSes
     assert not ef_gate["passed"]
     assert out["allocation"] == []
     assert out["allocation_rationale"] == []
+    assert out["safe_contribution_monthly"] is None
+    assert out["recommended_contribution_monthly"] is None
+    assert out["stretch_contribution_monthly"] is None
+
+
+@pytest.mark.asyncio
+async def test_explanation_fields_present(client: AsyncClient, db: AsyncSession):
+    user = await _make_user(db, f"rec_explain_{uuid.uuid4().hex[:6]}@test.com")
+    await _seed_account_and_txns(db, user.id, income=8000, spending=3000, balance=20000)
+
+    res = await client.post("/api/v1/recommendations/run", json=_risk_profile_payload(), headers=_headers(user.id))
+    assert res.status_code == 201
+    out = res.json()["outputs"]
+
+    assert out["why_this_bucket"]
+    assert out["why_now_or_not_now"]
+    assert out["downside_note"]
+    assert out["rebalance_guidance"]
+    assert "unlock_actions" in out
+
+
+@pytest.mark.asyncio
+async def test_goal_type_affects_bucket_direction(client: AsyncClient, db: AsyncSession):
+    user = await _make_user(db, f"rec_goal_{uuid.uuid4().hex[:6]}@test.com")
+    await _seed_account_and_txns(db, user.id, income=10000, spending=3000, balance=25000)
+    headers = _headers(user.id)
+
+    base_payload = _risk_profile_payload()
+    base_payload["risk_profile"]["answers"] = {
+        "market_drop_reaction": 3,
+        "investment_experience": 3,
+        "income_stability": 3,
+        "loss_tolerance_pct": 3,
+        "goal_priority": 3,
+    }
+    base_payload["horizon_months"] = 120
+
+    emergency = await client.post(
+        "/api/v1/recommendations/run",
+        json={**base_payload, "goal_type": "emergency", "target_horizon_months": 12},
+        headers=headers,
+    )
+    retirement = await client.post(
+        "/api/v1/recommendations/run",
+        json={**base_payload, "goal_type": "retirement", "target_horizon_months": 240},
+        headers=headers,
+    )
+    assert emergency.status_code == 201
+    assert retirement.status_code == 201
+
+    order = ["conservative", "moderate_conservative", "balanced", "moderate_growth", "growth"]
+    b_em = emergency.json()["outputs"]["risk_bucket"]
+    b_ret = retirement.json()["outputs"]["risk_bucket"]
+    assert order.index(b_em) <= order.index(b_ret)
+
+
+@pytest.mark.asyncio
+async def test_what_if_higher_contribution_improves_median(client: AsyncClient, db: AsyncSession):
+    user = await _make_user(db, f"rec_whatif_{uuid.uuid4().hex[:6]}@test.com")
+    await _seed_account_and_txns(db, user.id, income=9000, spending=3000, balance=20000)
+    headers = _headers(user.id)
+
+    run = await client.post("/api/v1/recommendations/run", json=_risk_profile_payload(), headers=headers)
+    assert run.status_code == 201
+
+    low = await client.post("/api/v1/recommendations/what-if", json={"monthly_amount": 800}, headers=headers)
+    high = await client.post("/api/v1/recommendations/what-if", json={"monthly_amount": 1800}, headers=headers)
+    assert low.status_code == 200
+    assert high.status_code == 200
+
+    low_end = low.json()["projection_end_override"]["median"]
+    high_end = high.json()["projection_end_override"]["median"]
+    assert high_end > low_end

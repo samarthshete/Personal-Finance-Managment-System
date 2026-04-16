@@ -32,6 +32,13 @@ async def get_summary(
     date_to: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None, description="Comma-separated UUIDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated UUIDs"),
+    expenses_only: bool = Query(
+        True,
+        description=(
+            "When true (default), only debit/expense transactions (amount < 0) are counted. "
+            "Pass expenses_only=false to include income in totals."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -41,6 +48,7 @@ async def get_summary(
         date_to=_parse_date(date_to),
         account_ids=_parse_uuid_list(account_ids),
         category_ids=_parse_uuid_list(category_ids),
+        expenses_only=expenses_only,
     )
 
 
@@ -49,6 +57,12 @@ async def get_trends(
     date_from: str = Query(...),
     date_to: str = Query(...),
     group_by: str = Query("month", pattern=r"^(day|week|month)$"),
+    expenses_only: bool = Query(
+        True,
+        description=(
+            "When true (default), only debit/expense transactions are included in trend totals."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -57,6 +71,7 @@ async def get_trends(
         date_from=_parse_date(date_from),
         date_to=_parse_date(date_to),
         group_by=group_by,
+        expenses_only=expenses_only,
     )
 
 

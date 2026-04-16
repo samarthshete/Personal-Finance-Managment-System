@@ -49,6 +49,10 @@ async def get_job(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -> Jo
     return job
 
 
+async def get_job_owned(db: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID) -> Job:
+    return await get_job(db, user_id, job_id)
+
+
 async def list_jobs(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -56,15 +60,18 @@ async def list_jobs(
     type_filter: Optional[str] = None,
     limit: int = 50,
 ) -> List[Job]:
-    stmt = select(Job).where(Job.user_id == user_id).order_by(Job.created_at.desc()).limit(limit)
+    stmt = (
+        select(Job)
+        .where(Job.user_id == user_id)
+        .order_by(Job.created_at.desc())
+        .limit(limit)
+    )
     if status_filter:
         stmt = stmt.where(Job.status == status_filter)
     if type_filter:
         stmt = stmt.where(Job.type == type_filter)
     result = await db.execute(stmt)
     return list(result.scalars().all())
-
-
 
 
 async def mark_running(db: AsyncSession, job: Job) -> None:

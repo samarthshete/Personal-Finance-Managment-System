@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 class CategoryTotal(BaseModel):
     category_id: Optional[str] = None
+    category_name: Optional[str] = None
+    category_type: Optional[str] = None
     total: Decimal
 
 

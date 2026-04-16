@@ -9,6 +9,45 @@ import { apiFetch, ApiError } from "@/lib/api";
 interface Session { id: string; title: string | null; created_at: string; updated_at: string }
 interface Message { id: string; role: string; content: string; tool_name?: string; created_at: string }
 
+function parseAssistantContent(content: string): { main: string; insights: string[]; actions: string[] } {
+  const lines = content.split("\n").map(l => l.trim()).filter(Boolean);
+  let section: "main" | "insights" | "actions" = "main";
+  const main: string[] = [];
+  const insights: string[] = [];
+  const actions: string[] = [];
+
+  for (const line of lines) {
+    const lowered = line.toLowerCase();
+    if (lowered.startsWith("direct answer:") || lowered === "answer:" || lowered === "direct answer") {
+      section = "main";
+      const tail = line.split(":").slice(1).join(":").trim();
+      if (tail) main.push(tail);
+      continue;
+    }
+    if (lowered.startsWith("insights:") || lowered === "insights") {
+      section = "insights";
+      const tail = line.split(":").slice(1).join(":").trim();
+      if (tail) insights.push(tail);
+      continue;
+    }
+    if (lowered.startsWith("next actions:") || lowered === "next actions") {
+      section = "actions";
+      const tail = line.split(":").slice(1).join(":").trim();
+      if (tail) actions.push(tail);
+      continue;
+    }
+
+    const normalized = line.startsWith("- ") ? line.slice(2).trim() : line;
+    if (!normalized) continue;
+
+    if (section === "insights") insights.push(normalized);
+    else if (section === "actions") actions.push(normalized);
+    else main.push(normalized);
+  }
+
+  return { main: main.join(" "), insights, actions };
+}
+
 const SUGGESTIONS = [
   "How much did I spend last month?",
   "What are my top spending categories?",
@@ -147,7 +186,34 @@ export default function AdvisorPage() {
                     ? "bg-neutral-900 text-white"
                     : "bg-white border border-neutral-200 text-neutral-800"
                 }`}>
-                  {m.content}
+                  {m.role === "assistant" ? (
+                    (() => {
+                      const parsed = parseAssistantContent(m.content || "");
+                      return (
+                        <div className="space-y-3">
+                          <p>{parsed.main || m.content}</p>
+                          {parsed.insights.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Insights</p>
+                              <ul className="list-disc space-y-1 pl-4 text-sm text-neutral-700">
+                                {parsed.insights.map((it, idx) => <li key={idx}>{it}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {parsed.actions.length > 0 && (
+                            <div>
+                              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Next actions</p>
+                              <ul className="list-disc space-y-1 pl-4 text-sm text-neutral-700">
+                                {parsed.actions.map((it, idx) => <li key={idx}>{it}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    m.content
+                  )}
                 </div>
               </div>
             ))}

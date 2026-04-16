@@ -36,5 +36,5 @@ async def get_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    job = await job_service.get_job(db, current_user.id, job_id)
+    job = await job_service.get_job_owned(db, current_user.id, job_id)
     return JobRead.model_validate(job)

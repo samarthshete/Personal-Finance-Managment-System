@@ -15,7 +15,7 @@ import math
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 import numpy as np
 from sqlalchemy import select, func
@@ -81,6 +81,8 @@ INFLATION_RATE = 0.025
 BUFFER_FACTOR = 0.80
 EMERGENCY_TARGET_MONTHS = 3.0
 SIM_PATHS = 500
+BUCKET_ORDER = ["conservative", "moderate_conservative", "balanced", "moderate_growth", "growth"]
+GoalType = Literal["retirement", "house", "emergency", "general"]
 
 
 # ---------------------------------------------------------------------------
@@ -110,17 +112,69 @@ def risk_bucket_for_score(score: int, horizon_months: int) -> str:
     return "balanced"
 
 
+def _shift_bucket(bucket: str, steps: int) -> str:
+    idx = BUCKET_ORDER.index(bucket) if bucket in BUCKET_ORDER else BUCKET_ORDER.index("balanced")
+    shifted = max(0, min(len(BUCKET_ORDER) - 1, idx + steps))
+    return BUCKET_ORDER[shifted]
+
+
+def apply_goal_mode(
+    base_bucket: str,
+    goal_type: Optional[GoalType],
+    horizon_months: int,
+) -> tuple[str, str]:
+    """
+    Deterministically adjust bucket based on explicit goal and horizon.
+    This keeps core risk logic unchanged while making recommendations more contextual.
+    """
+    if not goal_type:
+        return base_bucket, "No goal override applied; using your baseline risk profile."
+
+    steps = 0
+    reason_parts: list[str] = []
+
+    if goal_type == "emergency":
+        steps -= 2
+        reason_parts.append("emergency goal prioritizes capital preservation")
+    elif goal_type == "house":
+        if horizon_months <= 60:
+            steps -= 1
+            reason_parts.append("house goal with medium/short horizon favors lower volatility")
+    elif goal_type == "retirement":
+        if horizon_months >= 120:
+            steps += 1
+            reason_parts.append("retirement goal with long horizon supports more growth exposure")
+    elif goal_type == "general":
+        reason_parts.append("general goal keeps baseline risk posture")
+
+    if horizon_months <= 24:
+        steps -= 1
+        reason_parts.append("short horizon reduces risk tolerance")
+    elif horizon_months >= 180 and goal_type in {"retirement", "general"}:
+        steps += 1
+        reason_parts.append("very long horizon can absorb more volatility")
+
+    adjusted = _shift_bucket(base_bucket, steps)
+    if adjusted == base_bucket:
+        return adjusted, "; ".join(reason_parts) or "Goal profile aligns with baseline bucket."
+    return adjusted, "; ".join(reason_parts) or "Goal and horizon adjusted the risk bucket."
+
+
 # ---------------------------------------------------------------------------
 # Data-fetching helpers (user-scoped)
 # ---------------------------------------------------------------------------
 
 async def _monthly_spending_avg(db: AsyncSession, user_id: uuid.UUID, months: int = 3) -> Decimal:
-    """Average monthly absolute spending over last N months."""
+    """Average monthly absolute spending over last N months (negative-amount txns only)."""
     cutoff = date.today() - timedelta(days=months * 30)
     stmt = (
         select(func.coalesce(func.sum(func.abs(Transaction.amount)), 0))
         .join(FinancialAccount, FinancialAccount.id == Transaction.account_id)
-        .where(FinancialAccount.user_id == user_id, Transaction.posted_date >= cutoff)
+        .where(
+            FinancialAccount.user_id == user_id,
+            Transaction.posted_date >= cutoff,
+            Transaction.amount < 0,
+        )
     )
     total = (await db.execute(stmt)).scalar() or Decimal("0")
     return total / max(months, 1)
@@ -180,6 +234,37 @@ def compute_investable_amount(
     if surplus <= 0:
         return 0.0
     return round(surplus * BUFFER_FACTOR, 2)
+
+
+def compute_contribution_tiers(
+    monthly_income: Decimal,
+    monthly_spending: Decimal,
+    investable: float,
+) -> Optional[dict]:
+    """
+    Build conservative contribution tiers from real cashflow.
+    - safe: half of raw surplus (defensive pace)
+    - recommended: buffered investable amount
+    - stretch: up to 95% of surplus, capped to avoid reckless over-allocation
+    """
+    if investable <= 0:
+        return None
+
+    surplus = max(float(monthly_income) - float(monthly_spending), 0.0)
+    if surplus <= 0:
+        return None
+
+    safe = min(investable, surplus * 0.50)
+    recommended = investable
+    stretch = min(surplus * 0.95, recommended * 1.25)
+    stretch = max(stretch, recommended)
+    safe = min(safe, recommended)
+
+    return {
+        "safe_contribution_monthly": round(safe, 2),
+        "recommended_contribution_monthly": round(recommended, 2),
+        "stretch_contribution_monthly": round(stretch, 2),
+    }
 
 
 def rules_gates(
@@ -242,6 +327,56 @@ def rules_gates_structured(
         },
     ]
     return gates
+
+
+def derive_unlock_actions(
+    emergency_months: float,
+    cashflow_positive: bool,
+    severe_alerts: int,
+) -> list[str]:
+    actions: list[str] = []
+    if emergency_months < 1.0:
+        actions.append("Build emergency fund coverage to at least 1 month of expenses.")
+    if not cashflow_positive:
+        actions.append("Restore positive cashflow by cutting discretionary spend or increasing income.")
+    if severe_alerts >= 2:
+        actions.append("Reduce overspent budget categories below 100% utilization.")
+    return actions
+
+
+def explain_bucket_choice(
+    score: int,
+    base_bucket: str,
+    final_bucket: str,
+    goal_reason: str,
+    goal_type: Optional[GoalType],
+) -> str:
+    base_label = RISK_BUCKETS[base_bucket]["label"]
+    final_label = RISK_BUCKETS[final_bucket]["label"]
+    if final_bucket == base_bucket:
+        return (
+            f"Risk score {score} maps to {base_label}. "
+            f"{goal_reason}"
+        )
+    goal_txt = goal_type or "goal preferences"
+    return (
+        f"Risk score {score} maps to {base_label}, then adjusted to {final_label} "
+        f"for {goal_txt}. {goal_reason}"
+    )
+
+
+def explain_now_or_not_now(warnings: list[str]) -> str:
+    if warnings:
+        return "Investing is blocked for now because one or more safety gates failed."
+    return "Investing is allowed now because safety gates passed and surplus is available."
+
+
+def downside_note_for_bucket(bucket: str) -> str:
+    vol = RISK_BUCKETS[bucket]["vol_pct"] * 100
+    return (
+        f"{RISK_BUCKETS[bucket]['label']} portfolios can still decline in volatile markets "
+        f"(model volatility ~{vol:.1f}% annually). Projections are not guarantees."
+    )
 
 
 def _validate_allocation_invariant(allocation: list[dict]) -> None:
@@ -462,6 +597,9 @@ async def execute_run(
     user_id: uuid.UUID,
     risk_profile_input: Optional[dict] = None,
     horizon_override: Optional[int] = None,
+    goal_type: Optional[GoalType] = None,
+    target_horizon_months: Optional[int] = None,
+    override_contribution_monthly: Optional[float] = None,
 ) -> RecommendationRun:
     if risk_profile_input:
         answers = risk_profile_input["answers"]
@@ -473,7 +611,7 @@ async def execute_run(
 
     needs_profile = profile is None
     score = profile.score if profile else 50
-    horizon = horizon_override or (profile.horizon_months if profile else 60)
+    horizon = target_horizon_months or horizon_override or (profile.horizon_months if profile else 60)
     liquidity = profile.liquidity_need if profile else "moderate"
 
     monthly_spending = await _monthly_spending_avg(db, user_id, months=3)
@@ -485,9 +623,11 @@ async def execute_run(
     cashflow_positive = float(monthly_income) >= float(monthly_spending)
     investable = compute_investable_amount(monthly_income, monthly_spending)
 
-    bucket = risk_bucket_for_score(score, horizon)
+    base_bucket = risk_bucket_for_score(score, horizon)
+    bucket, goal_reason = apply_goal_mode(base_bucket, goal_type, horizon)
     warnings = rules_gates(emergency_months, cashflow_positive, severe_alerts)
     gates = rules_gates_structured(emergency_months, cashflow_positive, severe_alerts)
+    unlock_actions = derive_unlock_actions(emergency_months, cashflow_positive, severe_alerts)
 
     horizon_adj = 0
     if horizon < 24:
@@ -497,14 +637,20 @@ async def execute_run(
     elif horizon > 120:
         horizon_adj = 5
 
+    tiers = compute_contribution_tiers(monthly_income, monthly_spending, investable) if not warnings else None
+    recommended_contribution = tiers["recommended_contribution_monthly"] if tiers else 0.0
+    effective_contribution = recommended_contribution
+    if override_contribution_monthly is not None and not warnings:
+        effective_contribution = round(float(override_contribution_monthly), 2)
     if warnings:
         investable = 0.0
+        effective_contribution = 0.0
 
     allocation = model_portfolio(bucket) if not warnings else []
     _validate_allocation_invariant(allocation)
 
     action_items = _build_action_items(
-        warnings, emergency_months, cashflow_positive, investable, bucket, allocation,
+        warnings, emergency_months, cashflow_positive, effective_contribution, bucket, allocation,
     )
 
     run = RecommendationRun(user_id=user_id, status="completed")
@@ -523,9 +669,20 @@ async def execute_run(
         "inflation_assumed": INFLATION_RATE,
         "buffer_factor": BUFFER_FACTOR,
     }
-    if not warnings and investable > 0:
+    baseline_projection: list[dict] = []
+    if not warnings and recommended_contribution > 0:
+        baseline_projection = run_projection(
+            monthly_contribution=recommended_contribution,
+            initial_balance=float(balance),
+            horizon_months=horizon,
+            annual_return=bucket_cfg["return_pct"],
+            annual_vol=bucket_cfg["vol_pct"],
+            run_seed=run_seed,
+        )
+        _validate_projection_invariant(baseline_projection)
+    if not warnings and effective_contribution > 0:
         projection = run_projection(
-            monthly_contribution=investable,
+            monthly_contribution=effective_contribution,
             initial_balance=float(balance),
             horizon_months=horizon,
             annual_return=bucket_cfg["return_pct"],
@@ -538,10 +695,22 @@ async def execute_run(
         f"{a['ticker']} ({a['pct']}%): {a['rationale']}" for a in allocation
     ]
 
+    what_if = None
+    if not warnings and override_contribution_monthly is not None and baseline_projection and projection:
+        what_if = {
+            "baseline_contribution_monthly": recommended_contribution,
+            "override_contribution_monthly": effective_contribution,
+            "median_delta_end": round(
+                projection[-1]["median"] - baseline_projection[-1]["median"], 2
+            ),
+        }
+
     outputs = {
         "needs_profile": needs_profile,
         "risk_bucket": bucket,
         "risk_score": score,
+        "goal_type": goal_type,
+        "target_horizon_months": horizon,
         "monthly_spending_avg": round(float(monthly_spending), 2),
         "emergency_fund_months": emergency_months,
         "investable_monthly": investable,
@@ -553,10 +722,22 @@ async def execute_run(
         "risk": {"score": score, "bucket": bucket, "horizon_adjustment": horizon_adj},
         "allocation_rationale": allocation_rationale,
         "assumptions": assumptions,
+        "safe_contribution_monthly": tiers["safe_contribution_monthly"] if tiers else None,
+        "recommended_contribution_monthly": tiers["recommended_contribution_monthly"] if tiers else None,
+        "stretch_contribution_monthly": tiers["stretch_contribution_monthly"] if tiers else None,
+        "effective_contribution_monthly": effective_contribution if not warnings else None,
+        "why_this_bucket": explain_bucket_choice(score, base_bucket, bucket, goal_reason, goal_type),
+        "why_now_or_not_now": explain_now_or_not_now(warnings),
+        "downside_note": downside_note_for_bucket(bucket),
+        "rebalance_guidance": "Review allocation every 6-12 months or when any sleeve drifts by ~5%+.",
+        "unlock_actions": unlock_actions,
+        "what_if": what_if,
     }
     run.inputs_snapshot = {
         "score": score, "horizon_months": horizon,
         "liquidity_need": liquidity, "needs_profile": needs_profile,
+        "goal_type": goal_type,
+        "override_contribution_monthly": override_contribution_monthly,
     }
     run.outputs = outputs
 
@@ -611,3 +792,110 @@ async def get_latest_run(db: AsyncSession, user_id: uuid.UUID) -> Optional[Recom
         .limit(1)
     )
     return result.scalars().first()
+
+
+def _seed_from_text(seed_text: str) -> int:
+    return int(hashlib.sha256(seed_text.encode()).hexdigest()[:8], 16)
+
+
+async def simulate_what_if(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    monthly_amount: float,
+    goal_type: Optional[GoalType] = None,
+    target_horizon_months: Optional[int] = None,
+) -> dict:
+    from fastapi import HTTPException, status as http_status
+
+    latest = await get_latest_run(db, user_id)
+    if not latest or not latest.outputs:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="No recommendation run found. Generate a recommendation first.",
+        )
+
+    outputs = latest.outputs
+    warnings: list[str] = list(outputs.get("safety_warnings", []))
+    blocked = len(warnings) > 0
+
+    base_horizon = int(
+        (latest.inputs_snapshot or {}).get("horizon_months")
+        or outputs.get("target_horizon_months")
+        or 60
+    )
+    horizon = target_horizon_months or base_horizon
+    score = int(outputs.get("risk_score") or (latest.inputs_snapshot or {}).get("score") or 50)
+
+    base_bucket = risk_bucket_for_score(score, horizon)
+    bucket, _ = apply_goal_mode(base_bucket, goal_type, horizon)
+    bucket_cfg = RISK_BUCKETS[bucket]
+
+    base_monthly_amount = float(
+        outputs.get("recommended_contribution_monthly")
+        or outputs.get("effective_contribution_monthly")
+        or outputs.get("investable_monthly")
+        or 0.0
+    )
+
+    if blocked:
+        return {
+            "blocked": True,
+            "risk_bucket": bucket,
+            "goal_type": goal_type,
+            "horizon_months": horizon,
+            "base_monthly_amount": round(base_monthly_amount, 2),
+            "monthly_amount": round(float(monthly_amount), 2),
+            "why_now_or_not_now": outputs.get("why_now_or_not_now") or explain_now_or_not_now(warnings),
+            "unlock_actions": outputs.get("unlock_actions") or [],
+            "downside_note": outputs.get("downside_note") or downside_note_for_bucket(bucket),
+            "projection_base": [],
+            "projection_override": [],
+            "projection_end_base": None,
+            "projection_end_override": None,
+            "median_delta_end": 0.0,
+        }
+
+    initial_balance = float(await _total_balance(db, user_id))
+    seed = _seed_from_text(f"{user_id}:{horizon}:{bucket}")
+
+    projection_base = run_projection(
+        monthly_contribution=base_monthly_amount,
+        initial_balance=initial_balance,
+        horizon_months=horizon,
+        annual_return=bucket_cfg["return_pct"],
+        annual_vol=bucket_cfg["vol_pct"],
+        run_seed=seed,
+    )
+    projection_override = run_projection(
+        monthly_contribution=max(float(monthly_amount), 0.0),
+        initial_balance=initial_balance,
+        horizon_months=horizon,
+        annual_return=bucket_cfg["return_pct"],
+        annual_vol=bucket_cfg["vol_pct"],
+        run_seed=seed,
+    )
+    _validate_projection_invariant(projection_base)
+    _validate_projection_invariant(projection_override)
+
+    end_base = projection_base[-1] if projection_base else None
+    end_override = projection_override[-1] if projection_override else None
+    delta = 0.0
+    if end_base and end_override:
+        delta = round(end_override["median"] - end_base["median"], 2)
+
+    return {
+        "blocked": False,
+        "risk_bucket": bucket,
+        "goal_type": goal_type,
+        "horizon_months": horizon,
+        "base_monthly_amount": round(base_monthly_amount, 2),
+        "monthly_amount": round(float(monthly_amount), 2),
+        "why_now_or_not_now": outputs.get("why_now_or_not_now") or explain_now_or_not_now([]),
+        "unlock_actions": [],
+        "downside_note": outputs.get("downside_note") or downside_note_for_bucket(bucket),
+        "projection_base": projection_base,
+        "projection_override": projection_override,
+        "projection_end_base": end_base,
+        "projection_end_override": end_override,
+        "median_delta_end": delta,
+    }

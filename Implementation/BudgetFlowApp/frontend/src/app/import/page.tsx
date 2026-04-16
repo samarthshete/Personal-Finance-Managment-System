@@ -15,16 +15,13 @@ interface Account { id: string; name: string; type: string }
 interface Session {
   id: string; account_id: string; status: string; total_rows: number;
   imported_count: number; duplicate_count: number; failed_count: number;
-  started_at: string; row_errors?: { row: number; message: string }[];
+  started_at: string; completed_at?: string | null; row_errors?: { row: number; message: string }[];
 }
-
 interface ImportQueuedResponse {
   import_session_id: string;
   job_id: string;
-  status: string;
+  status: "queued";
 }
-
-const POLL_INTERVAL_MS = 1500;
 
 export default function ImportPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -37,10 +34,40 @@ export default function ImportPage() {
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<Session | null>(null);
   const defaultSet = useRef(false);
-  const pollIntervalsRef = useRef<ReturnType<typeof setInterval>[]>([]);
+  const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
-  useEffect(() => {
-    return () => { pollIntervalsRef.current.forEach(clearInterval); };
+  function isTerminalStatus(status: string): boolean {
+    return status === "completed" || status === "failed";
+  }
+
+  function stopPolling(sessionId: string) {
+    const interval = pollIntervalsRef.current[sessionId];
+    if (interval) {
+      clearInterval(interval);
+      delete pollIntervalsRef.current[sessionId];
+    }
+  }
+
+  function pollSessionUntilDone(sessionId: string) {
+    stopPolling(sessionId);
+    const interval = setInterval(async () => {
+      try {
+        const latest = await apiFetch<Session>(`/api/v1/transactions/import/sessions/${sessionId}`);
+        setSessions(prev => prev.map(s => (s.id === sessionId ? latest : s)));
+        setResult(prev => (prev && prev.id === sessionId ? latest : prev));
+        setDetail(prev => (prev && prev.id === sessionId ? latest : prev));
+        if (isTerminalStatus(latest.status)) {
+          stopPolling(sessionId);
+        }
+      } catch {
+        stopPolling(sessionId);
+      }
+    }, 1500);
+    pollIntervalsRef.current[sessionId] = interval;
+  }
+
+  useEffect(() => () => {
+    Object.keys(pollIntervalsRef.current).forEach(stopPolling);
   }, []);
 
   const load = useCallback(async () => {
@@ -52,6 +79,11 @@ export default function ImportPage() {
       ]);
       setAccounts(a);
       setSessions(s);
+      s.forEach((session) => {
+        if (!isTerminalStatus(session.status)) {
+          pollSessionUntilDone(session.id);
+        }
+      });
       if (a.length && !defaultSet.current) {
         defaultSet.current = true;
         setAccountId(a[0].id);
@@ -61,24 +93,6 @@ export default function ImportPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  function pollSessionUntilDone(sessionId: string) {
-    const interval = setInterval(async () => {
-      try {
-        const s = await apiFetch<Session>(`/api/v1/transactions/import/sessions/${sessionId}`);
-        setSessions((prev) => prev.map((x) => (x.id === sessionId ? s : x)));
-        setResult((r) => (r?.id === sessionId ? s : r));
-        if (s.status === "completed" || s.status === "failed") {
-          clearInterval(interval);
-          pollIntervalsRef.current = pollIntervalsRef.current.filter((i) => i !== interval);
-        }
-      } catch {
-        clearInterval(interval);
-        pollIntervalsRef.current = pollIntervalsRef.current.filter((i) => i !== interval);
-      }
-    }, POLL_INTERVAL_MS);
-    pollIntervalsRef.current.push(interval);
-  }
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -90,12 +104,12 @@ export default function ImportPage() {
       const fd = new FormData();
       fd.append("account_id", accountId);
       fd.append("file", file);
-      const res = await apiFetch<ImportQueuedResponse>("/api/v1/transactions/import", { method: "POST", formData: fd });
+      const queued = await apiFetch<ImportQueuedResponse>("/api/v1/transactions/import", { method: "POST", formData: fd });
+      const session = await apiFetch<Session>(`/api/v1/transactions/import/sessions/${queued.import_session_id}`);
+      setResult(session);
+      setSessions(prev => [session, ...prev.filter(s => s.id !== session.id)]);
+      pollSessionUntilDone(session.id);
       setFile(null);
-      const newSession = await apiFetch<Session>(`/api/v1/transactions/import/sessions/${res.import_session_id}`);
-      setResult(newSession);
-      setSessions((prev) => [newSession, ...prev]);
-      pollSessionUntilDone(res.import_session_id);
     } catch (e) { setError((e as ApiError).detail); }
     setUploading(false);
   }
@@ -110,7 +124,7 @@ export default function ImportPage() {
   const acctOpts = accounts.map(a => ({ value: a.id, label: `${a.name} (${a.type})` }));
 
   function SessionCard({ s }: { s: Session }) {
-    const isPending = s.status === "queued" || s.status === "processing";
+    const isActive = !isTerminalStatus(s.status);
     return (
       <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => loadDetail(s.id)}>
         <div className="flex items-center justify-between">
@@ -119,7 +133,7 @@ export default function ImportPage() {
             <p className="text-xs text-neutral-500">Rows: {s.total_rows} · Imported: {s.imported_count} · Duplicates: {s.duplicate_count} · Failed: {s.failed_count}</p>
           </div>
           <div className="flex items-center gap-2">
-            {isPending && <Spinner />}
+            {isActive && <Spinner />}
             <Badge color={s.status === "completed" ? "green" : s.status === "failed" ? "red" : "yellow"}>{s.status}</Badge>
           </div>
         </div>
@@ -156,11 +170,8 @@ export default function ImportPage() {
 
           {result && (
             <Card className="mb-6">
-              <h3 className="mb-2 font-medium text-neutral-900">Import Result</h3>
-              <div className="flex items-center gap-2">
-                {(result.status === "queued" || result.status === "processing") && <Spinner />}
-                <p className="text-sm">Status: <Badge color={result.status === "completed" ? "green" : result.status === "failed" ? "red" : "yellow"}>{result.status}</Badge></p>
-              </div>
+              <h3 className="mb-2 font-medium text-neutral-900">Latest Import</h3>
+              <p className="text-sm">Status: <Badge color={result.status === "completed" ? "green" : result.status === "failed" ? "red" : "yellow"}>{result.status}</Badge></p>
               <p className="text-sm">Imported: {result.imported_count} · Duplicates: {result.duplicate_count} · Failed: {result.failed_count}</p>
               {result.row_errors && result.row_errors.length > 0 && (
                 <div className="mt-2 max-h-40 overflow-auto rounded border p-2 text-xs">
@@ -176,7 +187,7 @@ export default function ImportPage() {
                 <h3 className="font-medium text-neutral-900">Session Detail</h3>
                 <button onClick={() => setDetail(null)} className="text-neutral-400 hover:text-neutral-600 text-sm">Close</button>
               </div>
-              <p className="text-sm">Status: <Badge color={detail.status === "completed" ? "green" : "red"}>{detail.status}</Badge></p>
+              <p className="text-sm">Status: <Badge color={detail.status === "completed" ? "green" : detail.status === "failed" ? "red" : "yellow"}>{detail.status}</Badge></p>
               <p className="text-sm">Total: {detail.total_rows} · Imported: {detail.imported_count} · Dup: {detail.duplicate_count} · Failed: {detail.failed_count}</p>
               {detail.row_errors && detail.row_errors.length > 0 && (
                 <div className="mt-2 max-h-40 overflow-auto rounded border p-2 text-xs">
@@ -187,7 +198,9 @@ export default function ImportPage() {
           )}
 
           <h2 className="mb-3 text-lg font-medium text-neutral-700">Previous Sessions</h2>
-          {sessions.length === 0 ? <EmptyState message="No import sessions yet" /> : (
+          {sessions.length === 0 ? (
+            <EmptyState message="No import sessions yet. Upload a CSV file above to create your first import job." />
+          ) : (
             <div className="space-y-3">{sessions.map(s => <SessionCard key={s.id} s={s} />)}</div>
           )}
         </>

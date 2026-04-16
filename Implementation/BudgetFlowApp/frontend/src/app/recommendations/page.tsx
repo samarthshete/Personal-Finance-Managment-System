@@ -15,10 +15,17 @@ import { apiFetch, ApiError } from "@/lib/api";
 interface AllocationSlice { asset: string; ticker: string; pct: number; rationale: string }
 interface ProjectionPoint { month: number; median: number; p10: number; p90: number }
 interface RecItem { id: string; priority: number; type: string; title: string; details: Record<string, unknown> | null; confidence: number }
+interface WhatIfSummary {
+  baseline_contribution_monthly: number;
+  override_contribution_monthly: number;
+  median_delta_end: number;
+}
 interface RunOutputs {
   needs_profile: boolean;
   risk_bucket: string | null;
   risk_score: number | null;
+  goal_type?: "retirement" | "house" | "emergency" | "general" | null;
+  target_horizon_months?: number | null;
   monthly_spending_avg: number;
   emergency_fund_months: number;
   investable_monthly: number;
@@ -26,9 +33,34 @@ interface RunOutputs {
   safety_warnings: string[];
   allocation: AllocationSlice[];
   projection: ProjectionPoint[];
+  safe_contribution_monthly?: number | null;
+  recommended_contribution_monthly?: number | null;
+  stretch_contribution_monthly?: number | null;
+  effective_contribution_monthly?: number | null;
+  why_this_bucket?: string | null;
+  why_now_or_not_now?: string | null;
+  downside_note?: string | null;
+  rebalance_guidance?: string | null;
+  unlock_actions?: string[];
+  what_if?: WhatIfSummary | null;
 }
 interface Run { id: string; status: string; outputs: RunOutputs | null; items: RecItem[]; created_at: string }
 interface RunListItem { id: string; status: string; created_at: string }
+interface WhatIfResponse {
+  blocked: boolean;
+  risk_bucket: string | null;
+  horizon_months: number;
+  base_monthly_amount: number;
+  monthly_amount: number;
+  why_now_or_not_now: string;
+  unlock_actions: string[];
+  downside_note: string | null;
+  projection_base: ProjectionPoint[];
+  projection_override: ProjectionPoint[];
+  projection_end_base: ProjectionPoint | null;
+  projection_end_override: ProjectionPoint | null;
+  median_delta_end: number;
+}
 
 const Q_LABELS: Record<string, string> = {
   market_drop_reaction: "If the market dropped 20%, I would:",
@@ -57,6 +89,13 @@ const LIQUIDITY_OPTS = [
   { value: "high", label: "High (may need cash soon)" },
 ];
 
+const GOAL_OPTS = [
+  { value: "general", label: "General investing" },
+  { value: "retirement", label: "Retirement" },
+  { value: "house", label: "House down payment" },
+  { value: "emergency", label: "Emergency reserve" },
+];
+
 const ITEM_ICONS: Record<string, string> = {
   emergency_fund: "🛡", reduce_spending: "✂", stabilize: "⚠",
   invest: "📈", continue_saving: "💰", increase_income: "💡",
@@ -69,8 +108,11 @@ export default function RecommendationsPage() {
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [whatIfAmount, setWhatIfAmount] = useState("");
+  const [whatIfResult, setWhatIfResult] = useState<WhatIfResponse | null>(null);
 
   const [answers, setAnswers] = useState<Record<string, number>>({
     market_drop_reaction: 3, investment_experience: 2,
@@ -78,6 +120,7 @@ export default function RecommendationsPage() {
   });
   const [horizon, setHorizon] = useState("60");
   const [liquidity, setLiquidity] = useState("moderate");
+  const [goalType, setGoalType] = useState("general");
 
   const loadRuns = useCallback(async () => {
     try {
@@ -99,9 +142,11 @@ export default function RecommendationsPage() {
   async function generate() {
     setGenerating(true);
     setError("");
+    setWhatIfResult(null);
     try {
       const body = showForm ? {
         risk_profile: { answers, horizon_months: parseInt(horizon), liquidity_need: liquidity },
+        goal_type: goalType,
       } : {};
       const data = await apiFetch<Run>("/api/v1/recommendations/run", { method: "POST", body });
       setActiveRun(data);
@@ -110,7 +155,29 @@ export default function RecommendationsPage() {
     setGenerating(false);
   }
 
+  async function runWhatIf() {
+    const amount = Number(whatIfAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError("Enter a valid monthly amount.");
+      return;
+    }
+    setSimulating(true);
+    setError("");
+    try {
+      const data = await apiFetch<WhatIfResponse>("/api/v1/recommendations/what-if", {
+        method: "POST",
+        body: { monthly_amount: amount, goal_type: o?.goal_type || goalType },
+      });
+      setWhatIfResult(data);
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setSimulating(false);
+    }
+  }
+
   const o = activeRun?.outputs;
+  const blocked = Boolean(o && o.safety_warnings.length > 0);
 
   return (
     <AppShell>
@@ -148,9 +215,10 @@ export default function RecommendationsPage() {
                 </div>
               </div>
             ))}
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Select label="Investment Horizon" options={HORIZON_OPTS} value={horizon} onChange={e => setHorizon(e.target.value)} />
               <Select label="Liquidity Need" options={LIQUIDITY_OPTS} value={liquidity} onChange={e => setLiquidity(e.target.value)} />
+              <Select label="Goal" options={GOAL_OPTS} value={goalType} onChange={e => setGoalType(e.target.value)} />
             </div>
           </div>
         )}
@@ -162,7 +230,7 @@ export default function RecommendationsPage() {
       {activeRun && o && (
         <div className="space-y-6">
           {/* Warnings */}
-          {o.safety_warnings.length > 0 && (
+          {blocked && (
             <Card className="border-amber-200 bg-amber-50">
               <h3 className="text-sm font-semibold text-amber-800 mb-2">Action Required Before Investing</h3>
               <ul className="space-y-1.5">
@@ -172,6 +240,14 @@ export default function RecommendationsPage() {
                   </li>
                 ))}
               </ul>
+              {(o.unlock_actions || []).length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-white p-3">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700">Unlock actions</p>
+                  <ul className="list-disc space-y-1 pl-4 text-sm text-amber-800">
+                    {(o.unlock_actions || []).map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </div>
+              )}
             </Card>
           )}
 
@@ -205,6 +281,38 @@ export default function RecommendationsPage() {
             </Card>
           </div>
 
+          {/* Contribution tiers */}
+          {!blocked && o.recommended_contribution_monthly != null && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold text-neutral-700">Contribution Tiers</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                  <p className="text-xs text-neutral-500">Safe</p>
+                  <p className="text-lg font-semibold text-neutral-900">{fmt$(o.safe_contribution_monthly || 0)}</p>
+                </div>
+                <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                  <p className="text-xs text-neutral-500">Recommended</p>
+                  <p className="text-lg font-semibold text-neutral-900">{fmt$(o.recommended_contribution_monthly || 0)}</p>
+                </div>
+                <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                  <p className="text-xs text-neutral-500">Stretch</p>
+                  <p className="text-lg font-semibold text-neutral-900">{fmt$(o.stretch_contribution_monthly || 0)}</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Explanations */}
+          <Card>
+            <h3 className="mb-3 text-sm font-semibold text-neutral-700">Recommendation Explanation</h3>
+            <div className="space-y-2 text-sm text-neutral-700">
+              {o.why_this_bucket && <p><span className="font-medium text-neutral-900">Why this bucket:</span> {o.why_this_bucket}</p>}
+              {o.why_now_or_not_now && <p><span className="font-medium text-neutral-900">Why now / not now:</span> {o.why_now_or_not_now}</p>}
+              {o.downside_note && <p><span className="font-medium text-neutral-900">Downside note:</span> {o.downside_note}</p>}
+              {o.rebalance_guidance && <p><span className="font-medium text-neutral-900">Rebalance guidance:</span> {o.rebalance_guidance}</p>}
+            </div>
+          </Card>
+
           {/* Action Plan */}
           {activeRun.items.length > 0 && (
             <div>
@@ -222,9 +330,9 @@ export default function RecommendationsPage() {
                           <Badge color="blue">{Math.round(item.confidence * 100)}% confidence</Badge>
                         </div>
                         <p className="text-sm font-medium text-neutral-900">{item.title}</p>
-                        {item.details?.explanation ? (
+                        {typeof item.details?.explanation !== "undefined" && (
                           <p className="text-xs text-neutral-500 mt-1">{String(item.details.explanation)}</p>
-                        ) : null}
+                        )}
                       </div>
                     </div>
                   </Card>
@@ -234,7 +342,7 @@ export default function RecommendationsPage() {
           )}
 
           {/* Allocation */}
-          {o.allocation.length > 0 && (
+          {!blocked && o.allocation.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-neutral-700 mb-3">Model Portfolio Allocation</h3>
               <Card>
@@ -271,8 +379,46 @@ export default function RecommendationsPage() {
             </div>
           )}
 
+          {/* What-if simulation */}
+          {!blocked && (
+            <Card>
+              <h3 className="mb-3 text-sm font-semibold text-neutral-700">What If I Invest More?</h3>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="w-full sm:max-w-xs">
+                  <label className="mb-1 block text-xs text-neutral-500">Monthly contribution ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={whatIfAmount}
+                    onChange={(e) => setWhatIfAmount(e.target.value)}
+                    className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-400"
+                    placeholder="e.g. 1500"
+                  />
+                </div>
+                <Button onClick={runWhatIf} loading={simulating} disabled={!whatIfAmount.trim()}>
+                  Simulate
+                </Button>
+              </div>
+
+              {whatIfResult && (
+                <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700">
+                  <p>
+                    Base median: <span className="font-medium text-neutral-900">{fmt$(whatIfResult.projection_end_base?.median || 0)}</span>
+                    {" "}→ What-if median: <span className="font-medium text-neutral-900">{fmt$(whatIfResult.projection_end_override?.median || 0)}</span>
+                  </p>
+                  <p className="mt-1">
+                    Median change at horizon:{" "}
+                    <span className={`font-medium ${whatIfResult.median_delta_end >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                      {whatIfResult.median_delta_end >= 0 ? "+" : ""}{fmt$(whatIfResult.median_delta_end)}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </Card>
+          )}
+
           {/* Projection Chart */}
-          {o.projection.length > 1 && (
+          {!blocked && o.projection.length > 1 && (
             <div>
               <h3 className="text-sm font-semibold text-neutral-700 mb-3">
                 Growth Projection ({o.projection[o.projection.length - 1]?.month || 0} months)
@@ -283,7 +429,7 @@ export default function RecommendationsPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
                     <XAxis dataKey="month" tick={{ fontSize: 11 }} label={{ value: "Month", position: "insideBottom", offset: -2, fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(value: number | undefined) => value != null ? [`$${value.toLocaleString()}`, ""] : ["", ""]} labelFormatter={(label: unknown) => `Month ${label}`} />
+                    <Tooltip formatter={(value) => [`$${Number(value).toLocaleString()}`, ""]} labelFormatter={(l) => `Month ${l}`} />
                     <Legend verticalAlign="top" height={30} />
                     <Line type="monotone" dataKey="p90" name="Optimistic (90th)" stroke="#22c55e" strokeDasharray="4 2" dot={false} />
                     <Line type="monotone" dataKey="median" name="Expected (50th)" stroke="#171717" strokeWidth={2} dot={false} />

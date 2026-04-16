@@ -1,6 +1,5 @@
 """Tests for UC09 async job processing and report generation."""
 import uuid
-
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -57,12 +56,19 @@ async def client(db):
     app.dependency_overrides.clear()
 
 
-async def _run_worker_until_done(max_iterations: int = 10) -> None:
+async def _run_worker_until_done(db: AsyncSession, max_iterations: int = 10) -> None:
     """Run worker until no more pending jobs or max iterations."""
+    await db.rollback()
+    factory = async_sessionmaker(
+        bind=db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
     for _ in range(max_iterations):
-        processed = await run_once(fake_storage)
+        processed = await run_once(fake_storage, session_factory=factory)
         if not processed:
             break
+    db.expire_all()
 
 
 @pytest.mark.asyncio
@@ -99,7 +105,7 @@ async def test_worker_executes_report_job(client: AsyncClient, db: AsyncSession)
     assert res.status_code == 202
     report_id = res.json()["id"]
 
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
 
     get_res = await client.get(f"/api/v1/reports/{report_id}", headers=headers)
     assert get_res.status_code == 200
@@ -125,7 +131,7 @@ async def test_download_works_after_succeeded(client: AsyncClient, db: AsyncSess
     dl_res = await client.get(f"/api/v1/reports/{report_id}/download", headers=headers)
     assert dl_res.status_code == 409
 
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
 
     dl_res = await client.get(f"/api/v1/reports/{report_id}/download", headers=headers)
     assert dl_res.status_code == 200
@@ -156,6 +162,29 @@ async def test_user_isolation_job_and_report(client: AsyncClient, db: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_worker_drain_twice_same_test_session_stable(client: AsyncClient, db: AsyncSession):
+    """Regression: draining the worker twice must not corrupt asyncpg / engine state."""
+    user = await _create_user(db, f"worker_twice_{uuid.uuid4().hex[:8]}@test.com")
+    headers = _auth_header(user.id)
+    res = await client.post("/api/v1/reports", json={
+        "type": "monthly_summary",
+        "from_date": "2026-01-01",
+        "to_date": "2026-01-31",
+        "format": "csv",
+    }, headers=headers)
+    assert res.status_code == 202
+    report_id = res.json()["id"]
+    await _run_worker_until_done(db)
+    r1 = await client.get(f"/api/v1/reports/{report_id}", headers=headers)
+    assert r1.status_code == 200
+    assert r1.json()["status"] == "succeeded"
+    await _run_worker_until_done(db)
+    r2 = await client.get(f"/api/v1/reports/{report_id}", headers=headers)
+    assert r2.status_code == 200
+    assert r2.json()["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
 async def test_idempotency_two_jobs_for_same_request(client: AsyncClient, db: AsyncSession):
     user = await _create_user(db, f"idempotency_{uuid.uuid4().hex[:8]}@test.com")
     headers = _auth_header(user.id)
@@ -169,7 +198,7 @@ async def test_idempotency_two_jobs_for_same_request(client: AsyncClient, db: As
     assert res1.json()["id"] != res2.json()["id"]
     assert res1.json()["job_id"] != res2.json()["job_id"]
 
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
 
     for report_id in [res1.json()["id"], res2.json()["id"]]:
         get_res = await client.get(f"/api/v1/reports/{report_id}", headers=headers)

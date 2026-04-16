@@ -4,9 +4,7 @@ Run as: python -m app.worker.worker
 """
 import asyncio
 import traceback
-import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,31 +24,16 @@ def _get_storage():
     return S3Storage()
 
 
-async def _claim_next_job() -> Optional[uuid.UUID]:
-    """
-    Atomically claim the next pending job:
-    - SELECT ... FOR UPDATE SKIP LOCKED
-    - set status='running', started_at/updated_at=now()
-    - commit and return job.id (UUID)
-    """
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            stmt = (
-                select(Job)
-                .where(Job.status == "pending")
-                .order_by(Job.created_at.asc())
-                .limit(1)
-                .with_for_update(skip_locked=True)
-            )
-            result = await session.execute(stmt)
-            job = result.scalars().first()
-            if not job:
-                return None
-            now = datetime.now(timezone.utc)
-            job.status = "running"
-            job.started_at = now
-            job.updated_at = now
-        return job.id
+async def _fetch_pending_jobs(session: AsyncSession) -> list[Job]:
+    stmt = (
+        select(Job)
+        .where(Job.status == "pending")
+        .order_by(Job.created_at.asc())
+        .limit(BATCH_SIZE)
+        .with_for_update(skip_locked=True)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
 
 
 async def _execute_job(session: AsyncSession, job: Job, storage) -> bool:
@@ -63,7 +46,8 @@ async def _execute_job(session: AsyncSession, job: Job, storage) -> bool:
         )
         return True
 
-    # job is already marked running in _claim_next_job
+    await job_service.mark_running(session, job)
+
     try:
         result = await handler(session, job, storage)
         await job_service.mark_succeeded(session, job, result)
@@ -77,30 +61,27 @@ async def _execute_job(session: AsyncSession, job: Job, storage) -> bool:
         return True
 
 
-async def run_once(storage=None) -> bool:
+async def run_once(
+    storage=None,
+    session_factory: Optional[Any] = None,
+) -> bool:
     """
-    Process up to BATCH_SIZE jobs.
-    Each iteration:
-      - claims a job in a short transaction
-      - opens a fresh AsyncSessionLocal() to load and execute the job
-    All awaits are sequential; no asyncio.gather.
+    Process one batch of pending jobs. Returns True if any job was processed.
+    Used by tests to execute jobs synchronously.
+
+    *session_factory* lets tests use the same AsyncEngine / pool as the FastAPI
+    dependency override while still opening a fresh AsyncSession here (required
+    so job claim + handler run are not on the API's long-lived test session).
     """
     storage = storage or _get_storage()
-    processed_any = False
-
-    for _ in range(BATCH_SIZE):
-        job_id = await _claim_next_job()
-        if not job_id:
-            break
-
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job or job.status != "running":
-                continue
+    factory: Any = session_factory or AsyncSessionLocal
+    async with factory() as session:
+        jobs = await _fetch_pending_jobs(session)
+        if not jobs:
+            return False
+        for job in jobs:
             await _execute_job(session, job, storage)
-            processed_any = True
-
-    return processed_any
+        return True
 
 
 async def run_loop() -> None:
@@ -109,7 +90,11 @@ async def run_loop() -> None:
     print("Worker started, polling for jobs...")
     while True:
         try:
-            await run_once(storage)
+            async with AsyncSessionLocal() as session:
+                jobs = await _fetch_pending_jobs(session)
+                for job in jobs:
+                    await _execute_job(session, job, storage)
+                    print(f"Job {job.id} ({job.type}) -> {job.status}")
         except Exception as exc:
             print(f"Worker error: {exc}")
         await asyncio.sleep(POLL_INTERVAL)

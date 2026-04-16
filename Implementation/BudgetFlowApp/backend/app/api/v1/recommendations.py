@@ -9,6 +9,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.schemas.recommendation import (
     RunRequest, RecommendationRunRead, RecommendationRunListItem, RiskProfileRead,
+    WhatIfRequest, WhatIfResponse,
 )
 from app.services import recommendation_service
 
@@ -33,8 +34,26 @@ async def create_run(
         db, current_user.id,
         risk_profile_input=rp_input,
         horizon_override=payload.horizon_months,
+        goal_type=payload.goal_type,
+        target_horizon_months=payload.target_horizon_months,
+        override_contribution_monthly=payload.override_contribution_monthly,
     )
     return run
+
+
+@router.post("/what-if", response_model=WhatIfResponse)
+async def what_if_projection(
+    payload: WhatIfRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await recommendation_service.simulate_what_if(
+        db,
+        current_user.id,
+        monthly_amount=payload.monthly_amount,
+        goal_type=payload.goal_type,
+        target_horizon_months=payload.target_horizon_months,
+    )
 
 
 @router.get("/runs", response_model=List[RecommendationRunListItem])

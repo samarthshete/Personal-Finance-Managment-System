@@ -15,7 +15,11 @@ import EmptyState from "@/components/ui/EmptyState";
 import PageHeader from "@/components/ui/PageHeader";
 import { apiFetch, ApiError } from "@/lib/api";
 
-interface Summary { total_spending: number; by_category: { category_id: string | null; total: number }[]; by_account: { account_id: string; total: number }[] }
+interface Summary {
+  total_spending: number;
+  by_category: { category_id: string | null; category_name?: string | null; category_type?: string | null; total: number }[];
+  by_account: { account_id: string; total: number }[];
+}
 interface TrendPoint { period: string; total: number }
 interface BvaRow { category_id: string; limit_amount: number; spent_amount: number; percent: number }
 interface Budget { id: string; name: string }
@@ -112,7 +116,9 @@ export default function AnalyticsPage() {
                     : 0;
                   return (
                     <div key={i} className="flex items-center gap-3">
-                      <span className="w-32 truncate text-xs text-neutral-600">{c.category_id ? (catMap[c.category_id] || "Unknown") : "Uncategorized"}</span>
+                      <span className="w-32 truncate text-xs text-neutral-600">
+                        {c.category_name ?? (c.category_id ? (catMap[c.category_id] || "Unknown") : "Uncategorized")}
+                      </span>
                       <div className="flex-1 rounded-full bg-neutral-100 h-3">
                         <div className="h-3 rounded-full bg-neutral-700" style={{ width: `${pct}%` }} />
                       </div>

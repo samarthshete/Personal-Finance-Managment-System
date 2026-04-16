@@ -16,7 +16,7 @@ POSTGRES_USER := budgetflow_user
 POSTGRES_DB   := budgetflow_db
 
 .PHONY: help venv install db-up db-down db-reset db-wait check-db migrate test all \
-        run-backend run-frontend \
+        seed-demo run-backend run-frontend \
         up down logs logs-backend logs-db logs-worker migrate-docker reset-docker ps
 
 help: ## Show available targets
@@ -66,6 +66,9 @@ run-backend: check-db ## Start backend locally (uvicorn on port 8000)
 
 run-frontend: ## Start frontend (next dev on port 3000)
 	cd "$(CURDIR)/frontend" && npm run dev
+
+seed-demo: check-db ## Seed 3 demo accounts (idempotent; safe to re-run)
+	cd "$(CURDIR)/$(BACKEND)" && "$(PYTHON)" -m app.scripts.seed_demo_data
 
 all: db-reset install migrate test ## Full local reset: db-reset -> install -> migrate -> test
 

@@ -108,7 +108,7 @@ export default function JobsPage() {
       {loading ? (
         <Spinner />
       ) : jobs.length === 0 ? (
-        <EmptyState message="No jobs yet" />
+        <EmptyState message="No jobs yet. Jobs are created when you import transactions or generate reports." />
       ) : (
         <div className="space-y-3">
           {jobs.map((j) => (

@@ -1,10 +1,8 @@
 """
 LLM provider abstraction. Production uses OpenAI; tests inject FakeLLM.
 """
-from __future__ import annotations
-
 import json
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from app.services.advisor.tool_registry import TOOL_DEFINITIONS
 
@@ -12,13 +10,13 @@ from app.services.advisor.tool_registry import TOOL_DEFINITIONS
 @runtime_checkable
 class LLMProvider(Protocol):
     async def chat_completion(
-        self, messages: list[dict], tools: list[dict] | None = None,
+        self, messages: List[Dict], tools: Optional[List[Dict]] = None,
     ) -> dict:
         """Return an OpenAI-compatible chat completion response dict."""
         ...
 
 
-def openai_tool_schema() -> list[dict]:
+def openai_tool_schema() -> List[Dict]:
     return [
         {"type": "function", "function": defn}
         for defn in TOOL_DEFINITIONS.values()
@@ -26,7 +24,7 @@ def openai_tool_schema() -> list[dict]:
 
 
 class OpenAIProvider:
-    def __init__(self, api_key: str, model: str, base_url: str | None = None):
+    def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         import httpx
         self._api_key = api_key
         self._model = model
@@ -34,7 +32,7 @@ class OpenAIProvider:
         self._client = httpx.AsyncClient(timeout=60.0)
 
     async def chat_completion(
-        self, messages: list[dict], tools: list[dict] | None = None,
+        self, messages: List[Dict], tools: Optional[List[Dict]] = None,
     ) -> dict:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -57,16 +55,18 @@ class OpenAIProvider:
 class FakeLLM:
     """Deterministic LLM for tests. Returns canned tool calls or text."""
 
-    def __init__(self, responses: list[dict] | None = None):
+    def __init__(self, responses: Optional[List[Dict]] = None):
         self._responses = list(responses or [])
         self._call_idx = 0
+        self.calls: List[Dict[str, Any]] = []
 
     def push(self, response: dict):
         self._responses.append(response)
 
     async def chat_completion(
-        self, messages: list[dict], tools: list[dict] | None = None,
+        self, messages: List[Dict], tools: Optional[List[Dict]] = None,
     ) -> dict:
+        self.calls.append({"messages": messages, "tools": tools})
         if self._call_idx < len(self._responses):
             resp = self._responses[self._call_idx]
             self._call_idx += 1

@@ -1,7 +1,7 @@
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import date, datetime, timezone
+from typing import Any, List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -9,11 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat import ChatSession, ChatMessage
 from app.services.advisor.llm_provider import LLMProvider, openai_tool_schema
-from app.services.advisor.prompt import SYSTEM_PROMPT
+from app.services.advisor.prompt import get_system_prompt
 from app.services.advisor.tool_registry import execute_tool
 
 MAX_CONTEXT_MESSAGES = 10
 MAX_TOOL_ROUNDS = 3
+REFERENTIAL_TERMS = (
+    "that", "this month", "last month", "compare", "same", "only",
+    "again", "those", "it", "instead",
+)
 
 
 async def create_session(
@@ -49,9 +53,81 @@ async def get_session(
     return session
 
 
-def _build_context(messages: List[ChatMessage]) -> list[dict]:
-    """Build the LLM messages array from recent chat history."""
-    context: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+def _is_referential_followup(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in REFERENTIAL_TERMS)
+
+
+def _extract_recent_session_context(messages: List[ChatMessage]) -> dict[str, Any]:
+    """
+    Reconstruct lightweight session memory from recent tool call args:
+    last date range and optional account/category focus.
+    """
+    for m in reversed(messages):
+        if m.role != "assistant" or not m.tool_name or not m.tool_payload:
+            continue
+
+        args = m.tool_payload or {}
+        period_a = args.get("period_a") or {}
+        period_b = args.get("period_b") or {}
+
+        date_from = args.get("date_from") or period_b.get("date_from") or period_a.get("date_from")
+        date_to = args.get("date_to") or period_b.get("date_to") or period_a.get("date_to")
+        category_ids = args.get("category_ids")
+        account_ids = args.get("account_ids")
+
+        if date_from or date_to or category_ids or account_ids:
+            return {
+                "date_from": date_from,
+                "date_to": date_to,
+                "category_ids": category_ids,
+                "account_ids": account_ids,
+                "last_tool": m.tool_name,
+            }
+
+    return {}
+
+
+def _format_assistant_response(text: str) -> str:
+    trimmed = (text or "").strip()
+    if not trimmed:
+        return "Direct answer:\nI could not produce an answer from available data."
+
+    lowered = trimmed.lower()
+    if "insights:" in lowered and "next actions:" in lowered:
+        return trimmed
+
+    return (
+        "Direct answer:\n"
+        f"{trimmed}\n\n"
+        "Insights:\n"
+        f"- {trimmed}\n\n"
+        "Next actions:\n"
+        "- Ask a follow-up with a specific category/account if you want tighter guidance."
+    )
+
+
+def _build_context(messages: List[ChatMessage], pending_user_text: Optional[str] = None) -> list[dict]:
+    """Build the LLM messages array from recent chat history.
+
+    The system prompt is generated at call time so the embedded date resolution
+    table always reflects the real server date, not an import-time snapshot.
+    """
+    context: list[dict] = [{"role": "system", "content": get_system_prompt(date.today())}]
+    if pending_user_text and _is_referential_followup(pending_user_text):
+        memory = _extract_recent_session_context(messages[-MAX_CONTEXT_MESSAGES:])
+        if memory:
+            context.append({
+                "role": "system",
+                "content": (
+                    "SESSION MEMORY (use only if the current user message is referential): "
+                    f"last_date_from={memory.get('date_from')}, "
+                    f"last_date_to={memory.get('date_to')}, "
+                    f"category_ids={memory.get('category_ids')}, "
+                    f"account_ids={memory.get('account_ids')}, "
+                    f"last_tool={memory.get('last_tool')}."
+                ),
+            })
     recent = messages[-MAX_CONTEXT_MESSAGES:]
     for m in recent:
         if m.role == "tool":
@@ -100,7 +176,7 @@ async def send_message(
     tools_schema = openai_tool_schema()
 
     for _ in range(MAX_TOOL_ROUNDS):
-        context = _build_context(all_messages)
+        context = _build_context(all_messages, pending_user_text=content)
 
         try:
             resp = await llm.chat_completion(context, tools=tools_schema)
@@ -140,7 +216,7 @@ async def send_message(
             all_messages.extend([tool_call_msg, tool_result_msg])
             continue
 
-        assistant_text = msg.get("content") or "I could not generate a response."
+        assistant_text = _format_assistant_response(msg.get("content") or "I could not generate a response.")
         assistant_msg = ChatMessage(
             session_id=session.id, role="assistant", content=assistant_text,
         )

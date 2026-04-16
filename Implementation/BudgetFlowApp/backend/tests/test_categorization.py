@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import run_worker_until_done
 
@@ -32,7 +33,9 @@ def _csv_file(content: str, filename: str = "import.csv"):
     return {"file": (filename, io.BytesIO(content.encode()), "text/csv")}
 
 
-async def _import_transactions(client: AsyncClient, headers: dict, acct_id: str, csv: str = GOOD_CSV):
+async def _import_transactions(
+    db_session: AsyncSession, client: AsyncClient, headers: dict, acct_id: str, csv: str = GOOD_CSV,
+):
     resp = await client.post(
         API_IMPORT,
         data={"account_id": acct_id},
@@ -40,7 +43,7 @@ async def _import_transactions(client: AsyncClient, headers: dict, acct_id: str,
         headers=headers,
     )
     assert resp.status_code == 202
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
     return resp.json()
 
 
@@ -77,7 +80,7 @@ async def test_create_category_and_list_includes_user_category(async_client: Asy
 
 
 @pytest.mark.asyncio
-async def test_rule_categorization_sets_category_and_confidence(async_client: AsyncClient):
+async def test_rule_categorization_sets_category_and_confidence(async_client: AsyncClient, db_session: AsyncSession):
     email = f"cat_rule_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
@@ -88,7 +91,7 @@ async def test_rule_categorization_sets_category_and_confidence(async_client: As
         headers=headers,
     )
 
-    await _import_transactions(async_client, headers, acct_id)
+    await _import_transactions(db_session, async_client, headers, acct_id)
     tx_ids = await _get_transaction_ids(async_client, headers, acct_id)
     assert len(tx_ids) >= 1
 
@@ -111,13 +114,13 @@ async def test_rule_categorization_sets_category_and_confidence(async_client: As
 
 
 @pytest.mark.asyncio
-async def test_no_rule_sets_needs_manual_true(async_client: AsyncClient):
+async def test_no_rule_sets_needs_manual_true(async_client: AsyncClient, db_session: AsyncSession):
     email = f"cat_noru_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
 
     no_match_csv = "posted_date,amount,description\n2025-05-01,-20.00,Unique item nobody matches\n"
-    await _import_transactions(async_client, headers, acct_id, no_match_csv)
+    await _import_transactions(db_session, async_client, headers, acct_id, no_match_csv)
     tx_ids = await _get_transaction_ids(async_client, headers, acct_id)
     assert len(tx_ids) == 1
 
@@ -131,7 +134,7 @@ async def test_no_rule_sets_needs_manual_true(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_manual_override_sets_source_manual_and_needs_manual_false(async_client: AsyncClient):
+async def test_manual_override_sets_source_manual_and_needs_manual_false(async_client: AsyncClient, db_session: AsyncSession):
     email = f"cat_man_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
@@ -143,7 +146,7 @@ async def test_manual_override_sets_source_manual_and_needs_manual_false(async_c
     cat_id = cat_resp.json()["id"]
 
     csv = "posted_date,amount,description\n2025-06-01,-10.00,Random purchase\n"
-    await _import_transactions(async_client, headers, acct_id, csv)
+    await _import_transactions(db_session, async_client, headers, acct_id, csv)
     tx_ids = await _get_transaction_ids(async_client, headers, acct_id)
     assert len(tx_ids) == 1
 
@@ -221,7 +224,7 @@ async def test_patch_with_invalid_regex_returns_400(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_user_isolation_cannot_categorize_other_users_transaction(async_client: AsyncClient):
+async def test_user_isolation_cannot_categorize_other_users_transaction(async_client: AsyncClient, db_session: AsyncSession):
     email_a = f"cat_txiso_a_{uuid.uuid4().hex[:8]}@test.com"
     email_b = f"cat_txiso_b_{uuid.uuid4().hex[:8]}@test.com"
     headers_a = await _signup_and_login(async_client, email_a)
@@ -229,7 +232,7 @@ async def test_user_isolation_cannot_categorize_other_users_transaction(async_cl
 
     acct_a = await _create_account(async_client, headers_a)
     csv = "posted_date,amount,description\n2025-07-01,-5.00,Private tx\n"
-    await _import_transactions(async_client, headers_a, acct_a, csv)
+    await _import_transactions(db_session, async_client, headers_a, acct_a, csv)
     tx_ids = await _get_transaction_ids(async_client, headers_a, acct_a)
     assert len(tx_ids) == 1
 

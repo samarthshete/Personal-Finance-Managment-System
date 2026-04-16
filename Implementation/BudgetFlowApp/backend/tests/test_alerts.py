@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import run_worker_until_done
 
@@ -39,6 +40,7 @@ def _csv_file(content: str, filename: str = "import.csv"):
 
 
 async def _import_and_categorize(
+    db_session: AsyncSession,
     client: AsyncClient, headers: dict, acct_id: str, cat_id: str,
     csv_content: str,
 ):
@@ -50,7 +52,7 @@ async def _import_and_categorize(
         headers=headers,
     )
     assert resp.status_code == 202
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
 
     tx_resp = await client.get(API_TRANSACTIONS, params={"account_id": acct_id}, headers=headers)
     assert tx_resp.status_code == 200
@@ -66,14 +68,14 @@ async def _import_and_categorize(
 
 
 @pytest.mark.asyncio
-async def test_alert_generated_when_threshold_crossed(async_client: AsyncClient):
+async def test_alert_generated_when_threshold_crossed(async_client: AsyncClient, db_session: AsyncSession):
     email = f"alrt_gen_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
     cat_id = await _create_category(async_client, headers)
 
     csv = "posted_date,amount,description\n2026-03-10,-90.00,Lunch expense\n"
-    await _import_and_categorize(async_client, headers, acct_id, cat_id, csv)
+    await _import_and_categorize(db_session, async_client, headers, acct_id, cat_id, csv)
 
     budget_resp = await async_client.post(API_BUDGETS, json={
         "name": "March",
@@ -94,14 +96,14 @@ async def test_alert_generated_when_threshold_crossed(async_client: AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_no_duplicate_alerts_for_same_threshold(async_client: AsyncClient):
+async def test_no_duplicate_alerts_for_same_threshold(async_client: AsyncClient, db_session: AsyncSession):
     email = f"alrt_dup_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
     cat_id = await _create_category(async_client, headers)
 
     csv = "posted_date,amount,description\n2026-04-05,-120.00,Big expense\n"
-    await _import_and_categorize(async_client, headers, acct_id, cat_id, csv)
+    await _import_and_categorize(db_session, async_client, headers, acct_id, cat_id, csv)
 
     await async_client.post(API_BUDGETS, json={
         "name": "April",
@@ -120,7 +122,7 @@ async def test_no_duplicate_alerts_for_same_threshold(async_client: AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_alerts_user_isolated(async_client: AsyncClient):
+async def test_alerts_user_isolated(async_client: AsyncClient, db_session: AsyncSession):
     email_a = f"alrt_iso_a_{uuid.uuid4().hex[:8]}@test.com"
     email_b = f"alrt_iso_b_{uuid.uuid4().hex[:8]}@test.com"
     headers_a = await _signup_and_login(async_client, email_a)
@@ -129,7 +131,7 @@ async def test_alerts_user_isolated(async_client: AsyncClient):
     cat_a = await _create_category(async_client, headers_a)
 
     csv = "posted_date,amount,description\n2026-05-10,-200.00,Expensive\n"
-    await _import_and_categorize(async_client, headers_a, acct_a, cat_a, csv)
+    await _import_and_categorize(db_session, async_client, headers_a, acct_a, cat_a, csv)
 
     await async_client.post(API_BUDGETS, json={
         "name": "May",
@@ -147,14 +149,14 @@ async def test_alerts_user_isolated(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_mark_alert_read(async_client: AsyncClient):
+async def test_mark_alert_read(async_client: AsyncClient, db_session: AsyncSession):
     email = f"alrt_read_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
     cat_id = await _create_category(async_client, headers)
 
     csv = "posted_date,amount,description\n2026-06-15,-150.00,Over budget\n"
-    await _import_and_categorize(async_client, headers, acct_id, cat_id, csv)
+    await _import_and_categorize(db_session, async_client, headers, acct_id, cat_id, csv)
 
     await async_client.post(API_BUDGETS, json={
         "name": "June",
@@ -180,14 +182,14 @@ async def test_mark_alert_read(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_no_alert_if_under_threshold(async_client: AsyncClient):
+async def test_no_alert_if_under_threshold(async_client: AsyncClient, db_session: AsyncSession):
     email = f"alrt_none_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
     cat_id = await _create_category(async_client, headers)
 
     csv = "posted_date,amount,description\n2026-07-10,-5.00,Small purchase\n"
-    await _import_and_categorize(async_client, headers, acct_id, cat_id, csv)
+    await _import_and_categorize(db_session, async_client, headers, acct_id, cat_id, csv)
 
     await async_client.post(API_BUDGETS, json={
         "name": "July",

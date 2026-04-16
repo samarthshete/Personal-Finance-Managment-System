@@ -1,5 +1,4 @@
 import uuid
-
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -23,10 +22,17 @@ def _override_storage():
     return fake_storage
 
 
-async def _run_worker_until_done(max_iterations: int = 10) -> None:
+async def _run_worker_until_done(db: AsyncSession, max_iterations: int = 10) -> None:
+    await db.rollback()
+    factory = async_sessionmaker(
+        bind=db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
     for _ in range(max_iterations):
-        if not await run_once(fake_storage):
+        if not await run_once(fake_storage, session_factory=factory):
             break
+    db.expire_all()
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -81,7 +87,7 @@ async def test_create_report_csv(client: AsyncClient, db: AsyncSession):
     assert data["job_id"] is not None
     assert data["type"] == "monthly_summary"
     assert data["format"] == "csv"
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
     get_res = await client.get(f"/api/v1/reports/{data['id']}", headers=headers)
     assert get_res.status_code == 200
     final = get_res.json()
@@ -104,7 +110,7 @@ async def test_create_report_pdf(client: AsyncClient, db: AsyncSession):
     assert res.status_code == 202
     data = res.json()
     assert data["status"] == "queued"
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
     get_res = await client.get(f"/api/v1/reports/{data['id']}", headers=headers)
     assert get_res.status_code == 200
     final = get_res.json()
@@ -151,7 +157,7 @@ async def test_list_ordering(client: AsyncClient, db: AsyncSession):
         assert res.status_code == 202
         ids.append(res.json()["id"])
 
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
 
     res = await client.get("/api/v1/reports", headers=headers)
     assert res.status_code == 200
@@ -208,7 +214,7 @@ async def test_all_report_types(client: AsyncClient, db: AsyncSession):
             assert res.status_code == 202, f"Failed for {rtype}/{fmt}: {res.text}"
             report_ids.append(res.json()["id"])
 
-    await _run_worker_until_done()
+    await _run_worker_until_done(db)
 
     for report_id in report_ids:
         get_res = await client.get(f"/api/v1/reports/{report_id}", headers=headers)

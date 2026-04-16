@@ -5,6 +5,7 @@ import io
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import run_worker_until_done
 
@@ -32,7 +33,7 @@ def _csv_file(content: str, filename: str = "import.csv"):
 
 
 @pytest.mark.asyncio
-async def test_csv_import_happy_path(async_client: AsyncClient):
+async def test_csv_import_happy_path(async_client: AsyncClient, db_session: AsyncSession):
     email = f"imp_ok_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
@@ -49,7 +50,7 @@ async def test_csv_import_happy_path(async_client: AsyncClient):
     assert body["job_id"] is not None
     assert body["import_session_id"] is not None
 
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
 
     sess_resp = await async_client.get(f"{API_SESSIONS}/{body['import_session_id']}", headers=headers)
     assert sess_resp.status_code == 200
@@ -100,7 +101,7 @@ async def test_csv_import_user_isolation(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_csv_import_duplicate_detection(async_client: AsyncClient):
+async def test_csv_import_duplicate_detection(async_client: AsyncClient, db_session: AsyncSession):
     email = f"imp_dup_{uuid.uuid4().hex[:8]}@test.com"
     headers = await _signup_and_login(async_client, email)
     acct_id = await _create_account(async_client, headers)
@@ -111,7 +112,7 @@ async def test_csv_import_duplicate_detection(async_client: AsyncClient):
         API_IMPORT, data={"account_id": acct_id}, files=_csv_file(one_row, "a.csv"), headers=headers,
     )
     assert r1.status_code == 202
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
     sess1 = await async_client.get(f"{API_SESSIONS}/{r1.json()['import_session_id']}", headers=headers)
     assert sess1.json()["imported_count"] == 1
 
@@ -119,7 +120,7 @@ async def test_csv_import_duplicate_detection(async_client: AsyncClient):
         API_IMPORT, data={"account_id": acct_id}, files=_csv_file(one_row, "b.csv"), headers=headers,
     )
     assert r2.status_code == 202
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
     sess2 = await async_client.get(f"{API_SESSIONS}/{r2.json()['import_session_id']}", headers=headers)
     body = sess2.json()
     assert body["imported_count"] == 0
@@ -127,7 +128,7 @@ async def test_csv_import_duplicate_detection(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_user_isolated(async_client: AsyncClient):
+async def test_list_sessions_user_isolated(async_client: AsyncClient, db_session: AsyncSession):
     email_a = f"ses_a_{uuid.uuid4().hex[:8]}@test.com"
     email_b = f"ses_b_{uuid.uuid4().hex[:8]}@test.com"
     headers_a = await _signup_and_login(async_client, email_a)
@@ -137,7 +138,7 @@ async def test_list_sessions_user_isolated(async_client: AsyncClient):
     await async_client.post(
         API_IMPORT, data={"account_id": acct_a}, files=_csv_file(GOOD_CSV), headers=headers_a,
     )
-    await run_worker_until_done()
+    await run_worker_until_done(db_session)
 
     resp_a = await async_client.get(API_SESSIONS, headers=headers_a)
     assert resp_a.status_code == 200

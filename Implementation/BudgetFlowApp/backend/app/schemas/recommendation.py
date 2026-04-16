@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+GoalType = Literal["retirement", "house", "emergency", "general"]
 
 
 class RiskAnswers(BaseModel):
@@ -33,12 +35,23 @@ class RiskProfileRead(BaseModel):
 class RunRequest(BaseModel):
     risk_profile: Optional[RiskProfileCreate] = None
     horizon_months: Optional[int] = Field(None, ge=6, le=360)
+    goal_type: Optional[GoalType] = None
+    target_horizon_months: Optional[int] = Field(None, ge=6, le=360)
+    override_contribution_monthly: Optional[float] = Field(None, ge=0)
 
     @model_validator(mode="after")
     def check_horizon(self) -> "RunRequest":
         if self.horizon_months is not None and self.horizon_months < 6:
             raise ValueError("horizon_months must be >= 6")
+        if self.target_horizon_months is not None and self.target_horizon_months < 6:
+            raise ValueError("target_horizon_months must be >= 6")
         return self
+
+
+class WhatIfRequest(BaseModel):
+    monthly_amount: float = Field(..., ge=0)
+    goal_type: Optional[GoalType] = None
+    target_horizon_months: Optional[int] = Field(None, ge=6, le=360)
 
 
 class RecommendationItemRead(BaseModel):
@@ -86,10 +99,18 @@ class SimulationAssumptions(BaseModel):
     buffer_factor: float = 0.80
 
 
+class WhatIfSummary(BaseModel):
+    baseline_contribution_monthly: float
+    override_contribution_monthly: float
+    median_delta_end: float
+
+
 class RunOutputs(BaseModel):
     needs_profile: bool = False
     risk_bucket: Optional[str] = None
     risk_score: Optional[int] = None
+    goal_type: Optional[GoalType] = None
+    target_horizon_months: Optional[int] = None
     monthly_spending_avg: float = 0.0
     emergency_fund_months: float = 0.0
     investable_monthly: float = 0.0
@@ -101,6 +122,19 @@ class RunOutputs(BaseModel):
     risk: Optional[RiskDetail] = None
     allocation_rationale: List[str] = []
     assumptions: Optional[SimulationAssumptions] = None
+
+    safe_contribution_monthly: Optional[float] = None
+    recommended_contribution_monthly: Optional[float] = None
+    stretch_contribution_monthly: Optional[float] = None
+    effective_contribution_monthly: Optional[float] = None
+
+    why_this_bucket: Optional[str] = None
+    why_now_or_not_now: Optional[str] = None
+    downside_note: Optional[str] = None
+    rebalance_guidance: Optional[str] = None
+    unlock_actions: List[str] = []
+
+    what_if: Optional[WhatIfSummary] = None
 
 
 class RecommendationRunRead(BaseModel):
@@ -118,3 +152,20 @@ class RecommendationRunListItem(BaseModel):
     status: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class WhatIfResponse(BaseModel):
+    blocked: bool
+    risk_bucket: Optional[str] = None
+    goal_type: Optional[GoalType] = None
+    horizon_months: int
+    base_monthly_amount: float
+    monthly_amount: float
+    why_now_or_not_now: str
+    unlock_actions: List[str] = []
+    downside_note: Optional[str] = None
+    projection_base: List[ProjectionPoint] = []
+    projection_override: List[ProjectionPoint] = []
+    projection_end_base: Optional[ProjectionPoint] = None
+    projection_end_override: Optional[ProjectionPoint] = None
+    median_delta_end: float = 0.0
