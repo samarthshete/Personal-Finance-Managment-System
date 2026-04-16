@@ -23,7 +23,6 @@ def _override_storage():
 
 
 async def _run_worker_until_done(db: AsyncSession, max_iterations: int = 10) -> None:
-    await db.rollback()
     factory = async_sessionmaker(
         bind=db.bind,
         class_=AsyncSession,

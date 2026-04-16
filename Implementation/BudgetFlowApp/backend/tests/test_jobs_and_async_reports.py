@@ -58,7 +58,6 @@ async def client(db):
 
 async def _run_worker_until_done(db: AsyncSession, max_iterations: int = 10) -> None:
     """Run worker until no more pending jobs or max iterations."""
-    await db.rollback()
     factory = async_sessionmaker(
         bind=db.bind,
         class_=AsyncSession,

@@ -1,4 +1,8 @@
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+if (!BASE) {
+  throw new Error("NEXT_PUBLIC_API_BASE_URL is required");
+}
 
 export interface ApiError {
   status: number;

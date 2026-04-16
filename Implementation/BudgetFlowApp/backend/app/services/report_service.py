@@ -201,8 +201,10 @@ async def generate_report_by_id(
     if not report:
         raise ValueError("Report not found")
     await _do_generate(db, report, storage)
-    await db.commit()
-    await db.refresh(report)
+    # Do not commit here: the worker session must remain open so the same Job
+    # instance can be updated by job_service.mark_succeeded/mark_failed. An
+    # inner commit expires ORM state and breaks refresh() on the Job row.
+    await db.flush()
     return {"report_id": str(report.id), "storage_key": report.storage_key, "status": report.status}
 
 

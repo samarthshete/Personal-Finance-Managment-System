@@ -63,7 +63,6 @@ async def run_worker_until_done(db_session: AsyncSession, max_iterations: int = 
     A fresh AsyncSession is opened per worker batch via *session_factory* so we
     never share the long-lived ``db_session`` with the worker (FOR UPDATE / TX).
     """
-    await db_session.rollback()
     factory = async_sessionmaker(
         bind=db_session.bind,
         class_=AsyncSession,

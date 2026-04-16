@@ -16,7 +16,10 @@ class S3Storage:
             aws_secret_access_key=settings.S3_SECRET_KEY,
             region_name=settings.S3_REGION,
             use_ssl=settings.S3_USE_SSL,
-            config=BotoConfig(signature_version="s3v4"),
+            config=BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path" if settings.S3_FORCE_PATH_STYLE else "auto"},
+            ),
         )
         self._bucket = settings.S3_BUCKET
         self._ensure_bucket()

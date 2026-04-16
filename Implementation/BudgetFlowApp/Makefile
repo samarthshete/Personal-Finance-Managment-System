@@ -17,7 +17,7 @@ POSTGRES_DB   := budgetflow_db
 
 .PHONY: help venv install db-up db-down db-reset db-wait check-db migrate test all \
         seed-demo run-backend run-frontend \
-        up down logs logs-backend logs-db logs-worker migrate-docker reset-docker ps
+        up down logs logs-backend logs-db logs-worker migrate-docker reset-docker ps health-check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -96,6 +96,14 @@ logs-db: ## Tail db container logs
 
 logs-worker: ## Tail worker container logs
 	docker compose logs -f worker
+
+health-check: ## Check backend liveness and readiness endpoints
+	@echo "GET /health"
+	@curl -fsS http://localhost:8000/health || { echo "health check failed"; exit 1; }
+	@echo
+	@echo "GET /health/ready"
+	@curl -fsS http://localhost:8000/health/ready || { echo "readiness check failed"; exit 1; }
+	@echo
 
 migrate-docker: ## Run alembic upgrade head inside backend container
 	docker compose exec backend alembic upgrade head
