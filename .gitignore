@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+
+# Large binaries — use Google Drive or Git LFS; GitHub limit is 100MB
+*.mov
